@@ -63,35 +63,19 @@ async function buildTarget(outfile: string, target?: string) {
 }
 
 /**
- * Patch a Windows PE executable so it runs as a GUI app (no console window behind it).
- * Changes the Subsystem field from CONSOLE (3) to WINDOWS (2).
+ * The Windows executable is deliberately left on the CONSOLE subsystem.
  *
- * This is the same technique as Microsoft's `editbin /SUBSYSTEM:WINDOWS`. We do it by hand
- * because Bun's own `--windows-hide-console` is broken (oven-sh/bun#19916) and does not
- * support cross-compilation anyway. Pure byte editing, so it works when cross-compiling
- * from macOS or Linux too.
+ * This file used to patch the PE Subsystem field from CONSOLE (3) to WINDOWS (2) — the
+ * `editbin /SUBSYSTEM:WINDOWS` trick — to keep a console window from appearing behind the
+ * app. That patch made the binary unusable when double-clicked from Explorer: a GUI-subsystem
+ * process launched from the shell gets NO standard handles, and Bun's Worker startup dies
+ * instantly when there are none. The app exited about a millisecond in, showing no window and
+ * writing nothing anywhere. It only ever "worked" when started from a terminal, a pipe, or
+ * any other parent that happened to supply handles.
+ *
+ * The console window is hidden at runtime instead — see hideOwnConsoleWindow() in main.ts,
+ * which also takes care not to hide a shell's console when the app is run from one.
  */
-async function patchWindowsSubsystem(exePath: string) {
-  const buf = Buffer.from(await Bun.file(exePath).arrayBuffer())
-
-  // The DOS header must be at least 0x40 bytes to contain e_lfanew.
-  if (buf.length < 0x40) throw new Error('File too small to be a valid PE executable')
-
-  const peOffset = buf.readUInt32LE(0x3c) // e_lfanew
-  // Optional header starts after the PE signature (4) + COFF header (20); Subsystem sits at
-  // offset 68 within it.
-  const subsystemOffset = peOffset + 4 + 20 + 68
-
-  if (subsystemOffset + 2 > buf.length) throw new Error('PE file is truncated')
-  if (buf.toString('ascii', peOffset, peOffset + 4) !== 'PE\0\0')
-    throw new Error('Not a valid PE file')
-
-  if (buf.readUInt16LE(subsystemOffset) === 3) {
-    buf.writeUInt16LE(2, subsystemOffset) // IMAGE_SUBSYSTEM_WINDOWS_CUI -> _GUI
-    await Bun.write(exePath, buf)
-    console.log('  → Patched PE subsystem to GUI (no console window)')
-  }
-}
 
 /** macOS needs a bundle plus a signature, or Gatekeeper refuses to launch the binary. */
 async function makeMacApp(binaryPath: string, appDir: string) {
@@ -176,7 +160,6 @@ if (buildAll || targetArg) {
     console.log(`Building for ${name}...`)
     try {
       await buildTarget(outfile, target)
-      if (ext === '.exe') await patchWindowsSubsystem(outfile)
       console.log(`  → ${outfile}`)
       if (name.startsWith('linux-'))
         await makeLinuxDesktop(outfile, `dist/${APP_NAME}-${name}.desktop`)
@@ -199,7 +182,6 @@ if (buildAll || targetArg) {
   const outfile = `./${APP_NAME}${ext}`
   try {
     await buildTarget(outfile)
-    if (process.platform === 'win32') await patchWindowsSubsystem(outfile)
     if (process.platform === 'darwin') await makeMacApp(outfile, `./${DISPLAY_NAME}-macos.app`)
     console.log('Build successful!')
     console.log(`  → ${outfile}`)

@@ -6,7 +6,49 @@
  * nothing else for the life of the app. The window therefore gets the main thread and the
  * server gets a Worker — inverting this does not work.
  */
-export {}
+import { dlopen, FFIType, ptr } from 'bun:ffi'
+
+/**
+ * Hide the console window Windows allocates for a double-clicked executable.
+ *
+ * This is done at RUNTIME, on purpose. The obvious alternative — patching the PE subsystem
+ * field from CONSOLE to WINDOWS at build time, the `editbin /SUBSYSTEM:WINDOWS` trick — also
+ * removes the process's standard handles, and a double-clicked binary is then left with none
+ * at all. Bun's Worker startup does not survive that: `new Worker(...)` below kills the
+ * process outright, about a millisecond in, with no window, no output and no crash log. It
+ * cannot be caught, because the process is gone before any handler runs.
+ *
+ * Keeping the CONSOLE subsystem keeps stdio valid; hiding the window afterwards gets the same
+ * look. The cost is a brief console flash before this runs.
+ *
+ * Only hides a console this process OWNS. When the app is started from an existing terminal
+ * (`bun run`, or a shell), that console belongs to the shell and is shared — hiding it would
+ * take the user's own terminal window away. `GetConsoleProcessList` returning 1 means we are
+ * the only process attached, which is exactly the double-click case.
+ */
+function hideOwnConsoleWindow(): void {
+  if (process.platform !== 'win32') return
+
+  try {
+    const kernel32 = dlopen('kernel32.dll', {
+      GetConsoleWindow: { args: [], returns: FFIType.ptr },
+      GetConsoleProcessList: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
+    })
+    const user32 = dlopen('user32.dll', {
+      ShowWindow: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+    })
+
+    const hwnd = kernel32.symbols.GetConsoleWindow()
+    if (!hwnd) return // no console attached — nothing to hide
+
+    const pids = new Uint32Array(2)
+    if (kernel32.symbols.GetConsoleProcessList(ptr(pids), pids.length) !== 1) return
+
+    user32.symbols.ShowWindow(hwnd, 0) // SW_HIDE
+  } catch {
+    // Cosmetic only. A visible console is far better than failing to start.
+  }
+}
 
 /** The slice of webview-bun's API this app uses. See the import comment below for why. */
 interface WebviewWindow {
@@ -79,6 +121,12 @@ if (headless) {
     webview.title = 'BunView'
     webview.size = { width: 1100, height: 780, hint: 0 } // 0 = SizeHint.NONE (resizable)
     webview.navigate(url)
+
+    // Only now, with a real window about to appear. If the webview had failed instead, we
+    // fall through to printHeadless() below, and that message is only readable if the
+    // console is still on screen — the branch exists precisely for machines where no native
+    // window can be shown.
+    hideOwnConsoleWindow()
 
     // Blocks until the window is closed.
     webview.run()

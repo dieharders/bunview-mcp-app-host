@@ -6,6 +6,7 @@ import {
   type AppState,
   type EffortChoice,
   type ModelChoice,
+  type ProviderId,
 } from '../../shared/events'
 import { ApiError, openChatStream } from '../lib/api'
 
@@ -104,7 +105,12 @@ export function useClaudeStream() {
    * saying why not to.
    */
   const send = useCallback(
-    (prompt: string, model: ModelChoice = DEFAULT_MODEL, effort: EffortChoice = DEFAULT_EFFORT) => {
+    (
+      provider: ProviderId,
+      prompt: string,
+      model: ModelChoice = DEFAULT_MODEL,
+      effort: EffortChoice = DEFAULT_EFFORT,
+    ) => {
       const trimmed = prompt.trim()
       if (!trimmed || abortRef.current) return
 
@@ -122,7 +128,7 @@ export function useClaudeStream() {
       const run = async () => {
         try {
           for await (const event of openChatStream(
-            { prompt: trimmed, sessionId: sessionRef.current, model, effort },
+            { provider, prompt: trimmed, sessionId: sessionRef.current, model, effort },
             ac.signal,
           )) {
             switch (event.type) {

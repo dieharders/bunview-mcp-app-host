@@ -16,7 +16,7 @@ import {
   type EffortChoice,
   type ModelChoice,
 } from '../shared/events'
-import { provider } from './providers'
+import { getProvider } from './providers'
 import { HEARTBEAT_MS, PING, SSE_HEADERS, frame } from './sse'
 
 /**
@@ -49,6 +49,10 @@ export async function handleChat(req: Request): Promise<Response> {
   const effort: EffortChoice = EFFORTS.includes(body?.effort as EffortChoice)
     ? (body?.effort as EffortChoice)
     : DEFAULT_EFFORT
+
+  // Falls back rather than rejecting: an unknown id is a stale client, not an attack, and the
+  // default provider is a safe place to land.
+  const provider = getProvider(body?.provider)
 
   // BOTH disconnect signals, deliberately. `req.signal` is Bun's client-disconnect notice;
   // the stream's own cancel() fires when the response body is torn down. They usually both

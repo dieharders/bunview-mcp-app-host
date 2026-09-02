@@ -18,11 +18,14 @@ export function Composer({
   onStop,
   busy,
   disabled,
+  providerLabel,
 }: {
   onSend: (prompt: string, model: ModelChoice, effort: EffortChoice) => void
   onStop: () => void
   busy: boolean
   disabled: boolean
+  /** Whose agent this is, so the placeholder names the thing the user actually chose. */
+  providerLabel: string
 }) {
   const [value, setValue] = useState('')
   const [model, setModel] = useState<ModelChoice>(DEFAULT_MODEL)
@@ -57,7 +60,9 @@ export function Composer({
         rows={2}
         maxLength={MAX_CHARS}
         disabled={disabled}
-        placeholder={disabled ? 'Sign in to Claude Code to start…' : 'Ask Claude anything…'}
+        placeholder={
+          disabled ? `Sign in to ${providerLabel} to start…` : `Ask ${providerLabel} anything…`
+        }
         className="max-h-52 w-full resize-none bg-transparent px-3 py-2 text-sm text-slate-100 caret-brand-to placeholder:text-slate-500 focus:outline-none disabled:cursor-not-allowed"
       />
 

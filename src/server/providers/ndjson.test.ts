@@ -25,7 +25,9 @@ describe('readLines', () => {
   })
 
   test('reassembles a line split across three chunks', async () => {
-    expect(await collect([enc('{"ty'), enc('pe":"de'), enc('lta"}\n')])).toEqual(['{"type":"delta"}'])
+    expect(await collect([enc('{"ty'), enc('pe":"de'), enc('lta"}\n')])).toEqual([
+      '{"type":"delta"}',
+    ])
   })
 
   test('yields a final line with no trailing newline', async () => {

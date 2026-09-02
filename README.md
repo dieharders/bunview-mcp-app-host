@@ -25,14 +25,37 @@ obvious extension point.
 
 ```bash
 bun install
-claude auth login     # once, if you have not already
 bun run dev
 ```
 
-A window opens. The header shows your plan; the right-hand panel shows app state the agent
-can write to through this app's own MCP tools.
+A window opens and asks which plan to connect — Claude Code or Codex. **Nothing is contacted
+until you choose**, because probing a vendor means spawning their CLI to read your account.
 
+From there the app walks you the rest of the way: if the CLI is missing it offers to install
+it (showing the exact `npm install -g` command first), and if it is installed but signed out
+it offers a Sign in button. Once the header badge shows your plan, the composer unlocks.
+
+The right-hand panel shows app state the agent can write to through this app's own MCP tools.
 Try: **“Set the app status to hello and add a note.”** The panel updates as it answers.
+
+## Providers
+
+|                 | Claude Code                 | Codex                         |
+| --------------- | --------------------------- | ----------------------------- |
+| Runs on         | Claude Pro / Max            | ChatGPT Plus / Pro / Business |
+| Package         | `@anthropic-ai/claude-code` | `@openai/codex`               |
+| Streaming       | token by token              | **per message**               |
+| App's MCP tools | yes, in-process             | **no**                        |
+
+Both differences are stated on the picker rather than discovered later. `codex exec --json`
+emits completed items rather than token deltas, and `createSdkMcpServer` — which is what lets
+a tool mutate this app's live state with no IPC — is a Claude Agent SDK facility. Wiring
+Codex's own MCP config would put a process boundary between the tools and the app's state, so
+it is left undone rather than faked.
+
+> The Codex provider is written against OpenAI's published CLI reference and has **not** been
+> exercised against a real `codex` install. Its event mapping is deliberately tolerant, so an
+> unverified field name degrades to "no event" rather than a crash — but treat it as untested.
 
 ## Dev's Notes
 
@@ -118,7 +141,9 @@ Read-only, and arranged so widening scope is a deliberate act.
 | `BUNVIEW_CWD`                          | `homedir()`                                       | Session bucket, and what `--restricted` confines file tools to     |
 | `BUNVIEW_MODEL`                        | _(CLI default)_                                   | Also selectable per-message in the UI                              |
 | `BUNVIEW_EFFORT`                       | `low`                                             | Session-scoped; never written to your config                       |
-| `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                                    | Explicit path to the agent binary                                  |
+| `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                                    | Explicit path to the Claude binary                                 |
+| `BUNVIEW_CODEX_PATH`                   | _(discovered)_                                    | Explicit path to the Codex binary                                  |
+| `BUNVIEW_ALLOW_INSTALL`                | `1`                                               | Offer to install a missing CLI. Set `0` for managed/offline builds |
 | `BUNVIEW_ALLOW_API_KEY`                | `0`                                               | Stop stripping `ANTHROPIC_API_KEY`                                 |
 | `BUNVIEW_STALL_MS` / `BUNVIEW_WALL_MS` | `120000` / `600000`                               | Silence cap / total cap                                            |
 | `BUNVIEW_PORT`                         | `0`                                               | `0` = ephemeral                                                    |
@@ -179,13 +204,34 @@ running against your plan.
 when the server closes the stream — which for a one-shot completion re-fires the whole prompt
 the moment the answer finishes.
 
+## Onboarding: install and sign in
+
+Two endpoints reach outside the app's own process, and both are gated behind an explicit click
+that shows what will run first:
+
+- **`POST /api/install`** runs `npm install -g <package>` and streams npm's output back as SSE,
+  because a button that does nothing visible for thirty seconds is indistinguishable from a
+  broken one. Afterwards it clears the discovery cache and re-detects, so the freshly installed
+  binary is found without a restart. `BUNVIEW_ALLOW_INSTALL=0` removes the button entirely.
+- **`POST /api/login`** opens the vendor's sign-in command **in a real terminal window** rather
+  than driving it headless through pipes. Both vendors' login flows are interactive — they open
+  a browser, run a localhost callback listener, and may print a code to confirm — and
+  reimplementing that means owning a flow we do not control and cannot test against every
+  version. Getting it subtly wrong strands the user with no way to sign in at all, so this
+  delegates to the vendor's own proven path and then says "finish signing in, then press Retry".
+
 ## Adding a provider
 
-Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`,
-`stream()` — in a file beside `claude.ts`, then change the one line in
+Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`, `stream()` —
+in a file beside `claude.ts` and `codex.ts`, add it to `PROVIDERS` in
+[`shared/events.ts`](src/shared/events.ts) and to the registry in
 [`providers/index.ts`](src/server/providers/index.ts). Because `stream()` yields only
-`AppEvent`, the frontend needs no changes. It is not a registry on purpose: a `Map` plus a
-factory earns its keep only once the UI can actually choose between providers.
+`AppEvent`, the frontend needs no changes — it cannot tell the vendors apart.
+
+Discovery is shared: [`discovery.ts`](src/server/providers/discovery.ts) takes a `CliSpec`
+(binary name, npm package, path to the real entry point) and returns a spawnable **argv**
+rather than a bare path. That last part matters — Claude Code's bin is a native `claude.exe`,
+while Codex's is `bin/codex.js`, a Node launcher that has to be run as `node codex.js`.
 
 ## Build
 

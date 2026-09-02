@@ -113,7 +113,9 @@ function candidates(spec: CliSpec): string[] {
   if (IS_WIN) {
     const appdata = process.env.APPDATA
     if (appdata) {
-      out.push(join(appdata, 'npm', 'node_modules', ...spec.npmPackage.split('/'), ...spec.packageBin))
+      out.push(
+        join(appdata, 'npm', 'node_modules', ...spec.npmPackage.split('/'), ...spec.packageBin),
+      )
     }
   } else {
     const pkg = spec.npmPackage.split('/')

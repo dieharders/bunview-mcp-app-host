@@ -11,6 +11,7 @@ import { handleAuth } from './auth'
 import { handleChat } from './chat'
 import { config } from './config'
 import { hookShutdown } from './proc'
+import { handleInstall, handleLogin } from './setup'
 import { getState } from './state'
 
 // Must be installed before anything can spawn an agent. See proc.ts — without this, closing
@@ -33,6 +34,11 @@ const server = Bun.serve({
     '/api/chat': { POST: handleChat },
     '/api/auth': { GET: handleAuth },
     '/api/state': { GET: () => Response.json(getState()) },
+
+    // The only two endpoints that change the user's machine or open an external flow. Both
+    // are POST, and both are reached only from an explicit click that shows what will run.
+    '/api/install': { POST: handleInstall },
+    '/api/login': { POST: handleLogin },
 
     // Everything else is the bundled frontend. Bun scans this HTML for <script> and <link>
     // tags, runs its JS and CSS bundlers over them, and — under `bun build --compile` —

@@ -108,7 +108,8 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     loginCommand: 'codex login',
     // Stated in the picker rather than discovered later: `codex exec --json` emits completed
     // items, not token deltas, and its in-process tool surface is Claude-SDK-specific.
-    caveat: 'Replies arrive per message rather than token by token, and the app’s own MCP tools are unavailable.',
+    caveat:
+      'Replies arrive per message rather than token by token, and the app’s own MCP tools are unavailable.',
   },
 }
 
@@ -126,7 +127,14 @@ export interface ChatRequest {
 export type AuthResponse =
   | { state: 'ok'; account: string | null; plan: string | null; subscription: boolean }
   | { state: 'logged_out' }
-  | { state: 'cli_missing'; searched: string[]; unresolvedShim: string | null }
+  | {
+      state: 'cli_missing'
+      searched: string[]
+      unresolvedShim: string | null
+      /** Whether to offer an Install button. Decided on the server: it depends on npm being
+       *  present there, which the browser cannot know. */
+      canInstall: boolean
+    }
   | { state: 'unknown' }
 
 /**
@@ -134,8 +142,7 @@ export type AuthResponse =
  * external flow (signing in). Separate from AppEvent because these are not conversation.
  */
 export type SetupEvent =
-  | { type: 'log'; line: string }
-  | { type: 'done'; ok: boolean; message: string }
+  { type: 'log'; line: string } | { type: 'done'; ok: boolean; message: string }
 
 export interface AppState {
   status: string | null

@@ -10,7 +10,7 @@
  * multi-turn message array, cost accounting, retry policy, streaming input. Each of those is
  * a real feature of some provider and none of them is needed to render a chat window.
  */
-import type { AppEvent, EffortChoice, ModelChoice } from '../../shared/events'
+import type { AppEvent, EffortChoice, ModelChoice, ProviderId } from '../../shared/events'
 
 export interface ProviderDetection {
   /** Absolute path to the executable we would spawn, or null when not installed. */
@@ -48,7 +48,7 @@ export interface StreamOptions {
 }
 
 export interface Provider {
-  readonly id: string
+  readonly id: ProviderId
   readonly label: string
   detect(): Promise<ProviderDetection>
   authStatus(): Promise<ProviderAuth>

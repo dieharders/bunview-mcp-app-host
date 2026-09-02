@@ -11,7 +11,7 @@ import { Spinner } from './ui/Spinner'
  * key works perfectly well and would look identical, while billing per token instead of
  * against the user's plan. Saying which is in play is the honest thing to show.
  */
-export function AuthBadge({ auth, onRetry }: { auth: AuthResponse | null; onRetry: () => void }) {
+export function AuthBadge({ auth }: { auth: AuthResponse | null }) {
   if (!auth) {
     return (
       <span className="inline-flex items-center gap-2 text-xs text-slate-500">
@@ -45,20 +45,36 @@ export function AuthBadge({ auth, onRetry }: { auth: AuthResponse | null; onRetr
     )
   }
 
-  return <ProblemCard auth={auth} onRetry={onRetry} />
+  // Problems get a compact chip here and the full explanation in AuthProblem below the
+  // header. Putting the whole card in the header made it overflow the window: a header is a
+  // single fixed-height row and the card is several lines of prose plus a path list.
+  return (
+    <span className="inline-flex items-center gap-2 text-xs">
+      <span className="size-2 rounded-full bg-amber-400" aria-hidden />
+      <span className="text-amber-200">{SHORT_LABEL[auth.state]}</span>
+    </span>
+  )
 }
 
-function ProblemCard({
-  auth,
-  onRetry,
-}: {
-  auth: Extract<AuthResponse, { state: 'logged_out' | 'cli_missing' | 'unknown' }>
-  onRetry: () => void
-}) {
+const SHORT_LABEL: Record<'logged_out' | 'cli_missing' | 'unknown', string> = {
+  logged_out: 'Not signed in',
+  cli_missing: 'Claude Code not found',
+  unknown: 'Status unknown',
+}
+
+/**
+ * The full explanation for a broken setup, as a banner.
+ *
+ * Separate from the badge because this is the one screen a first-run user will actually have
+ * to read, and it needs the width to say what to type and where the app already looked.
+ */
+export function AuthProblem({ auth, onRetry }: { auth: AuthResponse | null; onRetry: () => void }) {
+  if (!auth || auth.state === 'ok') return null
+
   return (
     <div
       role="alert"
-      className="flex max-w-2xl items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-100"
+      className="flex items-start gap-3 border-b border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100"
     >
       {auth.state === 'cli_missing' ? (
         <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden />

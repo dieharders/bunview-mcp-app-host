@@ -4,7 +4,7 @@ import type { AppState, AuthResponse } from '../../shared/events'
 import { useClaudeStream } from '../hooks/useClaudeStream'
 import { fetchAuth } from '../lib/api'
 import { AppStatePanel } from './AppStatePanel'
-import { AuthBadge } from './AuthBadge'
+import { AuthBadge, AuthProblem } from './AuthBadge'
 import { Composer } from './Composer'
 import { MessageList } from './MessageList'
 import { Button } from './ui/Button'
@@ -52,7 +52,7 @@ export function Chat() {
         </span>
 
         <div className="ml-auto flex items-center gap-3">
-          <AuthBadge auth={auth} onRetry={loadAuth} />
+          <AuthBadge auth={auth} />
           {sessionId && (
             <Button variant="ghost" size="sm" onClick={reset} disabled={busy}>
               <MessageSquarePlus className="size-3.5" aria-hidden />
@@ -61,6 +61,8 @@ export function Chat() {
           )}
         </div>
       </header>
+
+      <AuthProblem auth={auth} onRetry={loadAuth} />
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">

@@ -265,6 +265,27 @@ that shows what will run first:
   version. Getting it subtly wrong strands the user with no way to sign in at all, so this
   delegates to the vendor's own proven path and then says "finish signing in, then press Retry".
 
+## A note on dependencies
+
+`@anthropic-ai/claude-agent-sdk` declares three peers — `zod`, `@modelcontextprotocol/sdk`
+and `@anthropic-ai/sdk` — but only **`zod`** is in this project's `dependencies`, and that is
+deliberate.
+
+`zod` is genuinely ours: [`mcp/app-tools.ts`](src/server/mcp/app-tools.ts) imports `z` to
+declare the MCP tool schemas. It must be **v4** — the SDK's peer range is `^4.0.0`.
+
+The other two are not imported anywhere, by us or by the SDK. `sdk.mjs` is a 1.4 MB
+self-contained bundle with zero imports of either; the MCP and Anthropic protocol strings you
+can find in the compiled binary come from inside that bundle, not from those packages. Bun
+auto-installs peers, so they land in `node_modules` regardless and `tsc` resolves the types
+the SDK's `.d.ts` re-exports. Verified: removing `@modelcontextprotocol/sdk` from
+`dependencies` leaves the compiled binary **byte-for-byte the same size**, and a clean
+`bun install --frozen-lockfile` still resolves both peers.
+
+The one case where this would matter is regenerating the lockfile with npm, pnpm or yarn,
+which do not auto-install peers the same way. If you need that, add both peers explicitly
+then — not before.
+
 ## Adding a provider
 
 Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`, `stream()` —

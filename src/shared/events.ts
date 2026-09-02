@@ -106,10 +106,11 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     plan: 'ChatGPT Plus, Pro or Business',
     npmPackage: '@openai/codex',
     loginCommand: 'codex login',
-    // Stated in the picker rather than discovered later: `codex exec --json` emits completed
-    // items, not token deltas, and its in-process tool surface is Claude-SDK-specific.
+    // Stated in the picker rather than discovered later. Note what this does NOT say: Codex's
+    // OWN tools — shell, file edits, web search, any MCP server the user has configured — work
+    // fine and show up as tool chips. What is missing is BunView's own tools; see codex.ts.
     caveat:
-      'Replies arrive per message rather than token by token, and the app’s own MCP tools are unavailable.',
+      'Replies arrive per message rather than token by token, and BunView’s own tools aren’t wired up yet (Codex’s built-in tools still work).',
   },
 }
 

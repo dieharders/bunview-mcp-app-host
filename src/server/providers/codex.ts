@@ -8,10 +8,24 @@
  *   * `codex exec --json` emits COMPLETED ITEMS, not token deltas. There is no equivalent of
  *     `--include-partial-messages`, so a reply arrives in one piece when the model finishes
  *     it. The UI's `waiting` phase carries that wait; nothing else changes.
- *   * The app's own MCP tools are not registered here. `createSdkMcpServer` is a Claude Agent
- *     SDK facility that runs tools in-process; Codex takes MCP servers through its own config
- *     file, which would put a process boundary between the tools and this app's state. Wiring
- *     that up is a real feature, not a line of config, so it is left undone rather than faked.
+ *   * BunView's OWN tools are not registered here. Codex's own tools are untouched — shell,
+ *     file edits, web search and any MCP server the user has configured all work, and are
+ *     mapped to tool chips below.
+ *
+ *     The reason ours are missing is the registration channel, not the tools. The Claude Agent
+ *     SDK has a bidirectional control protocol over the same stdio stream it uses to drive the
+ *     CLI: `createSdkMcpServer` registers a tool for that session only, and when the model
+ *     calls it the CLI asks back up the stream and our handler runs in this process. Codex's
+ *     `exec --json` is one-way — prompt in, JSONL out — with no channel to answer on.
+ *
+ *     It is still DOABLE, just not for free: Codex reads MCP servers from
+ *     `~/.codex/config.toml`, and a `url` entry there uses streamable HTTP, so BunView could
+ *     serve `POST /mcp` from the Bun server it already runs and keep the tools in-process
+ *     after all. The costs are what stopped it: it writes to the user's GLOBAL config rather
+ *     than being scoped to one session the way the SDK's registration is, it currently needs
+ *     `experimental_use_rmcp_client = true`, and it means implementing the MCP wire protocol
+ *     rather than calling a helper. That is a feature, not a line of config — so it is left
+ *     undone and said out loud rather than faked.
  *
  * NOTE: this provider is written against OpenAI's published CLI reference and has NOT been
  * exercised against a real `codex` install on this machine. The event mapping below is

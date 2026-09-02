@@ -85,7 +85,9 @@ const serverReady = new Promise<number>((resolve, reject) => {
 })
 
 const port = await serverReady
-const url = `http://localhost:${port}`
+// 127.0.0.1 rather than `localhost`: the server binds the IPv4 loopback, and on Windows
+// `localhost` frequently resolves to ::1 first — which would refuse the connection.
+const url = `http://127.0.0.1:${port}`
 
 function printHeadless(reason?: string) {
   console.log(`\n  BunView is running at:\n`)

@@ -19,6 +19,18 @@ import { getState } from './state'
 hookShutdown()
 
 const server = Bun.serve({
+  // Loopback ONLY. Bun's default is 0.0.0.0, and that default is wrong twice over here.
+  //
+  // Security: the only client is a webview on this machine. Bound to 0.0.0.0, every device on
+  // the network can reach /api/chat — spending the user's Claude subscription — and /api/install,
+  // which installs software. Neither endpoint authenticates, because the design assumes the
+  // caller is the local window.
+  //
+  // Ergonomics: Windows Firewall prompts on the first launch of any program that listens on a
+  // non-loopback address. Loopback traffic is never filtered, so binding here removes the popup
+  // outright, with no firewall rule and no admin rights.
+  hostname: '127.0.0.1',
+
   // 0 = let the OS pick a free port. The ready handshake already carries `server.port` back
   // to the main thread, so ephemeral ports cost nothing and remove a whole class of
   // "something else is already on 3000" failures.

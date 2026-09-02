@@ -57,8 +57,18 @@ if (permissionMode === 'bypassPermissions' && !bool('BUNVIEW_ALLOW_BYPASS', fals
 }
 
 export const config = {
-  /** Explicit path to the agent binary, skipping discovery entirely. */
+  /** Explicit paths to the agent binaries, skipping discovery entirely. */
   claudePath: str('BUNVIEW_CLAUDE_PATH'),
+  codexPath: str('BUNVIEW_CODEX_PATH'),
+
+  /**
+   * Whether the app may install a missing CLI for the user.
+   *
+   * On by default because the install is always gated behind an explicit click that shows the
+   * exact command first — but a managed or offline deployment can turn the button off
+   * entirely rather than relying on nobody pressing it.
+   */
+  allowInstall: bool('BUNVIEW_ALLOW_INSTALL', true),
 
   /**
    * Working directory for the agent session.

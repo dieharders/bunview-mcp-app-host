@@ -8,17 +8,19 @@ import { config } from '../config'
 import { childEnv } from '../env'
 import { getState, getVersion } from '../state'
 import { buildOptions } from './claude-options'
-import { discoverClaude } from './claude-discovery'
+import { CLAUDE_SPEC, discoverCli } from './discovery'
 import { mapMessage, type MapState } from './claude-map'
 import { track, untrack } from '../proc'
 import type { Provider, ProviderAuth, ProviderDetection, StreamOptions } from './types'
+
+const discover = () => discoverCli(CLAUDE_SPEC, config.claudePath)
 
 const AUTH_TIMEOUT_MS = 15_000
 /** Keep the tail, not the transcript: a wedged process can produce a lot of stderr. */
 const STDERR_TAIL_BYTES = 4096
 
 async function detect(): Promise<ProviderDetection> {
-  const found = await discoverClaude()
+  const found = await discover()
   return { path: found.path, searched: found.searched, unresolvedShim: found.unresolvedShim }
 }
 
@@ -32,7 +34,7 @@ interface AuthStatusJson {
 }
 
 async function authStatus(): Promise<ProviderAuth> {
-  const found = await discoverClaude()
+  const found = await discover()
   if (!found.path) {
     return { state: 'cli_missing', plan: null, account: null, subscription: false }
   }
@@ -73,7 +75,7 @@ async function authStatus(): Promise<ProviderAuth> {
 }
 
 async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator<AppEvent> {
-  const found = await discoverClaude()
+  const found = await discover()
   if (!found.path) {
     yield { type: 'error', code: 'cli_missing', message: ERROR_COPY.cli_missing }
     return

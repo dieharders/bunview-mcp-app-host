@@ -67,7 +67,55 @@ export type EffortChoice = (typeof EFFORTS)[number]
 export const DEFAULT_EFFORT: EffortChoice = 'low'
 export const DEFAULT_MODEL: ModelChoice = 'default'
 
+/**
+ * Which vendor's agent to talk to.
+ *
+ * The user picks this BEFORE the app probes anything, because probing means spawning that
+ * vendor's CLI to read their account — work nobody should do on a subscription the user has
+ * not said they want to use.
+ */
+export const PROVIDER_IDS = ['claude', 'codex'] as const
+export type ProviderId = (typeof PROVIDER_IDS)[number]
+
+export interface ProviderInfo {
+  id: ProviderId
+  /** Product name, as its vendor writes it. */
+  label: string
+  /** The subscription this runs on, for the picker. */
+  plan: string
+  /** npm package that provides the CLI, shown before we offer to install it. */
+  npmPackage: string
+  /** Command the user would type to sign in, shown in the setup banner. */
+  loginCommand: string
+  /** Honest note about what this provider cannot do here. Empty when nothing is missing. */
+  caveat: string
+}
+
+export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
+  claude: {
+    id: 'claude',
+    label: 'Claude Code',
+    plan: 'Claude Pro or Max',
+    npmPackage: '@anthropic-ai/claude-code',
+    loginCommand: 'claude auth login',
+    caveat: '',
+  },
+  codex: {
+    id: 'codex',
+    label: 'Codex',
+    plan: 'ChatGPT Plus, Pro or Business',
+    npmPackage: '@openai/codex',
+    loginCommand: 'codex login',
+    // Stated in the picker rather than discovered later: `codex exec --json` emits completed
+    // items, not token deltas, and its in-process tool surface is Claude-SDK-specific.
+    caveat: 'Replies arrive per message rather than token by token, and the app’s own MCP tools are unavailable.',
+  },
+}
+
+export const DEFAULT_PROVIDER: ProviderId = 'claude'
+
 export interface ChatRequest {
+  provider: ProviderId
   prompt: string
   sessionId: string | null
   model: ModelChoice
@@ -80,6 +128,14 @@ export type AuthResponse =
   | { state: 'logged_out' }
   | { state: 'cli_missing'; searched: string[]; unresolvedShim: string | null }
   | { state: 'unknown' }
+
+/**
+ * Progress from a setup action that changes the user's machine (installing a CLI) or opens an
+ * external flow (signing in). Separate from AppEvent because these are not conversation.
+ */
+export type SetupEvent =
+  | { type: 'log'; line: string }
+  | { type: 'done'; ok: boolean; message: string }
 
 export interface AppState {
   status: string | null

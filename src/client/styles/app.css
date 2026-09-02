@@ -1,0 +1,100 @@
+@import 'tailwindcss';
+
+/* Design tokens.
+ *
+ * Tailwind v4 has no JS config — the theme IS this block, and every token here becomes a
+ * utility (`bg-navy-850`, `text-brand-to`, `animate-bubble-in`). There is deliberately no
+ * tailwind.config.js and no postcss.config.js in this project. */
+@theme {
+  --color-navy-950: #05070f;
+  --color-navy-900: #0a0e1a;
+  --color-navy-850: #0d1322;
+  --color-navy-800: #131b30;
+  --color-navy-700: #1c2742;
+
+  --color-brand-from: #7c3aed;
+  --color-brand-via: #6366f1;
+  --color-brand-to: #22d3ee;
+
+  --animate-bubble-in: bubble-in 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+
+  @keyframes bubble-in {
+    from {
+      transform: translateY(6px) scale(0.94);
+      opacity: 0;
+    }
+    to {
+      transform: translateY(0) scale(1);
+      opacity: 1;
+    }
+  }
+}
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-navy-900 text-slate-200 antialiased;
+  }
+
+  /* Tailwind v4's Preflight drops the pointer cursor on buttons — restore it. */
+  button:not(:disabled),
+  [role='button']:not(:disabled),
+  a[href],
+  label[for],
+  select,
+  summary {
+    cursor: pointer;
+  }
+
+  /* Chrome on Windows renders the native <option> popup light regardless of color-scheme,
+   * which makes the model and effort pickers unreadable against this theme. */
+  select option,
+  select optgroup {
+    @apply bg-navy-900 text-slate-100;
+  }
+
+  /* Reduced motion, with animate-spin and animate-pulse EXEMPT: those report state (working,
+   * waiting) rather than decorate, and freezing them removes information. Near-zero rather
+   * than `none` so animation end events still fire. */
+  @media (prefers-reduced-motion: reduce) {
+    *:not(.animate-spin, .animate-pulse),
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .bg-gradient-brand {
+    background-image: linear-gradient(
+      135deg,
+      var(--color-brand-from),
+      var(--color-brand-via),
+      var(--color-brand-to)
+    );
+  }
+}
+
+/* `@utility`, not a plain class: v4 only registers the former, so variants work on it. */
+@utility scrollbar-slim {
+  scrollbar-width: thin;
+  scrollbar-color: --alpha(var(--color-white) / 20%) transparent;
+
+  &::-webkit-scrollbar {
+    width: 0.375rem;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: --alpha(var(--color-white) / 20%);
+    border-radius: var(--radius-full);
+  }
+}

@@ -1,0 +1,94 @@
+/**
+ * Main thread: start the server in a Worker, then open a native window pointed at it.
+ *
+ * The ordering is not a style choice. `webview.run()` runs a blocking native event loop that
+ * never returns until the user closes the window, so whichever thread calls it can do
+ * nothing else for the life of the app. The window therefore gets the main thread and the
+ * server gets a Worker — inverting this does not work.
+ */
+export {}
+
+/** The slice of webview-bun's API this app uses. See the import comment below for why. */
+interface WebviewWindow {
+  title: string
+  size: { width: number; height: number; hint: number }
+  navigate(url: string): void
+  /** Blocks on a native event loop until the window is closed. */
+  run(): void
+}
+
+const headless = process.argv.includes('--headless')
+
+// The specifier MUST stay a plain string literal, and this file MUST stay at the repo root.
+// Two separate constraints meet here:
+//
+//   * Bun discovers worker modules by STATIC ANALYSIS of this call. Wrapping the path in
+//     `new URL(..., import.meta.url)` defeats it — the module is silently left out of the
+//     compiled binary and the app dies at launch with ModuleNotFound.
+//   * A plain specifier resolves against the entrypoint's directory, which in the compiled
+//     binary is the bunfs root (the common ancestor of build.ts's `entrypoints`). Keeping
+//     main.ts at the repo root makes that root the repo root, so `./src/server/worker.ts`
+//     means the same thing in dev and inside the executable.
+//
+// Moving this file into src/ breaks the second one; making the path dynamic breaks the first.
+const worker = new Worker('./src/server/worker.ts')
+
+const serverReady = new Promise<number>((resolve, reject) => {
+  const timeout = setTimeout(() => {
+    reject(new Error('Server failed to start within 10 seconds'))
+  }, 10_000)
+
+  worker.onmessage = (event) => {
+    if (event.data?.type === 'ready') {
+      clearTimeout(timeout)
+      resolve(event.data.port as number)
+    }
+  }
+
+  worker.onerror = (event) => {
+    clearTimeout(timeout)
+    reject(new Error(`Worker error: ${event.message}`))
+  }
+})
+
+const port = await serverReady
+const url = `http://localhost:${port}`
+
+function printHeadless(reason?: string) {
+  console.log(`\n  BunView is running at:\n`)
+  console.log(`  → ${url}\n`)
+  if (reason) console.log(`  (${reason})\n`)
+}
+
+if (headless) {
+  printHeadless()
+} else {
+  try {
+    // Imported dynamically inside the try so that a missing WebView2 runtime (Windows) or
+    // WebKitGTK (Linux) degrades to "open this URL yourself" instead of crashing on startup.
+    //
+    // The specifier goes through a variable so TypeScript does not follow it. webview-bun
+    // ships raw .ts rather than compiled output plus .d.ts, so `tsc` typechecks the library's
+    // own source — and it does not currently pass under `strict` (a bun:ffi Pointer is typed
+    // as `number` but can be a `bigint`). `skipLibCheck` only covers .d.ts files, so this is
+    // the seam that keeps a third-party type bug out of our typecheck.
+    const specifier = 'webview-bun'
+    const { Webview } = (await import(specifier)) as { Webview: new () => WebviewWindow }
+
+    const webview = new Webview()
+    webview.title = 'BunView'
+    webview.size = { width: 1100, height: 780, hint: 0 } // 0 = SizeHint.NONE (resizable)
+    webview.navigate(url)
+
+    // Blocks until the window is closed.
+    webview.run()
+
+    // The window is gone. Terminating the worker does NOT reap processes the worker spawned,
+    // which is why the worker installs its own exit sweep (src/server/proc.ts) — without it,
+    // closing the window mid-answer leaves a claude process running against the user's plan.
+    worker.terminate()
+    process.exit(0)
+  } catch {
+    printHeadless('Native window unavailable — open the URL above in your browser')
+  }
+}

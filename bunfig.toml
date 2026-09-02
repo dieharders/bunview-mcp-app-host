@@ -1,0 +1,5 @@
+[test]
+# Registers a DOM on globalThis so @testing-library/react works under `bun test`.
+# Preloaded rather than imported per-file because the registrator must run before
+# React is imported anywhere.
+preload = ["./src/client/test-setup.ts"]

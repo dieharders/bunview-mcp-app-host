@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+          - os: macos-latest
+            target: darwin-x64
+          - os: windows-latest
+            target: windows-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+      - run: bun test
+
+      # Tailwind's output is an INPUT to the bundle (index.html links it), so it has to exist
+      # before build.ts runs. build.ts fails loudly if it does not, but generating it here
+      # keeps that gate as a backstop rather than the mechanism.
+      - run: bun run build:css
+
+      - run: bun run build.ts --target=${{ matrix.target }}
+
+      - name: Package (Windows)
+        if: matrix.target == 'windows-x64'
+        shell: bash
+        run: 7z a "dist/bunview-${{ matrix.target }}.zip" "./dist/bunview-${{ matrix.target }}.exe"
+
+      - name: Package (macOS)
+        if: startsWith(matrix.target, 'darwin-')
+        run: |
+          cd dist
+          # Zip the .app bundle rather than the bare binary: Gatekeeper checks the bundle's
+          # signature, and a loose executable is blocked on download.
+          if [ -d "BunView-macos.app" ]; then
+            zip -r "bunview-${{ matrix.target }}.zip" "BunView-macos.app"
+          else
+            zip "bunview-${{ matrix.target }}.zip" "bunview-${{ matrix.target }}"
+          fi
+
+      - name: Package (Linux)
+        if: startsWith(matrix.target, 'linux-')
+        run: |
+          cd dist
+          zip "bunview-${{ matrix.target }}.zip" "bunview-${{ matrix.target }}" "bunview-${{ matrix.target }}.desktop"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bunview-${{ matrix.target }}
+          path: dist/bunview-${{ matrix.target }}.zip
+          if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          # Draft, so the release notes and the binaries can be checked before anyone
+          # downloads them.
+          draft: true
+          files: dist/*.zip

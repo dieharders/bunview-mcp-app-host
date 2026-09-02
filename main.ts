@@ -50,15 +50,6 @@ function hideOwnConsoleWindow(): void {
   }
 }
 
-/** The slice of webview-bun's API this app uses. See the import comment below for why. */
-interface WebviewWindow {
-  title: string
-  size: { width: number; height: number; hint: number }
-  navigate(url: string): void
-  /** Blocks on a native event loop until the window is closed. */
-  run(): void
-}
-
 const headless = process.argv.includes('--headless')
 
 // The specifier MUST stay a plain string literal, and this file MUST stay at the repo root.
@@ -109,13 +100,11 @@ if (headless) {
     // Imported dynamically inside the try so that a missing WebView2 runtime (Windows) or
     // WebKitGTK (Linux) degrades to "open this URL yourself" instead of crashing on startup.
     //
-    // The specifier goes through a variable so TypeScript does not follow it. webview-bun
-    // ships raw .ts rather than compiled output plus .d.ts, so `tsc` typechecks the library's
-    // own source — and it does not currently pass under `strict` (a bun:ffi Pointer is typed
-    // as `number` but can be a `bigint`). `skipLibCheck` only covers .d.ts files, so this is
-    // the seam that keeps a third-party type bug out of our typecheck.
-    const specifier = 'webview-bun'
-    const { Webview } = (await import(specifier)) as { Webview: new () => WebviewWindow }
+    // The specifier MUST stay a literal, exactly as for the Worker above: Bun's bundler
+    // discovers it by static analysis, and hiding it behind a variable meant the package was
+    // embedded in the compiled binary only when the minifier happened to inline the const.
+    // tsc is kept away from the package's non-strict source by types/webview-bun.d.ts instead.
+    const { Webview } = await import('webview-bun')
 
     const webview = new Webview()
     webview.title = 'BunView'

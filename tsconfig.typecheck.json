@@ -1,0 +1,13 @@
+{
+  // Typecheck-only config. It exists so the `paths` entry below stays OUT of tsconfig.json:
+  // Bun's bundler honours tsconfig `paths` too, and pointing it at a .d.ts would make it
+  // bundle a declaration file with no runtime code — `Webview` would silently be undefined.
+  // The bundler reads tsconfig.json (no mapping, resolves the real package); tsc reads this.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "webview-bun": ["./types/webview-bun.d.ts"]
+    }
+  },
+  "include": ["src", "*.ts", "types"]
+}

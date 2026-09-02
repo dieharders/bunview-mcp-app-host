@@ -113,7 +113,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     // Stated in the picker rather than discovered later. Note what this does NOT say: Codex's
     // OWN tools — shell, file edits, web search, any MCP server the user has configured — work
     // fine and show up as tool chips. What is missing is BunView's own tools; see codex.ts.
-    caveat: 'Replies arrive per message rather than token by token.',
+    caveat: '', // Replies arrive by message instead of token.
   },
 }
 

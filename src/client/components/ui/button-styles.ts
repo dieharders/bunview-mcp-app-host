@@ -16,7 +16,7 @@ const base =
   'disabled:cursor-not-allowed disabled:opacity-50'
 
 const variants: Record<ButtonVariant, string> = {
-  primary: 'bg-gradient-brand text-white shadow-lg shadow-brand-via/20 hover:brightness-110',
+  primary: 'bg-brand-via text-white shadow-lg shadow-brand-via/20 hover:brightness-110',
   outline: 'border border-white/15 bg-white/5 text-slate-100 hover:bg-white/10',
   ghost: 'text-slate-300 hover:bg-white/5 hover:text-white',
   danger: 'border border-red-500/40 bg-red-500/10 text-red-200 hover:bg-red-500/20',

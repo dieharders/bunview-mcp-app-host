@@ -13,10 +13,9 @@ export function ProviderPicker({ onChoose }: { onChoose: (id: ProviderId) => voi
   return (
     <main className="grid h-full place-items-center p-8">
       <div className="w-full max-w-lg">
-        <h1 className="text-lg font-semibold text-white">Connect an AI plan</h1>
+        <h1 className="text-lg font-semibold text-white">Connect your AI plan</h1>
         <p className="mt-1 text-sm text-slate-400">
-          BunView drives the CLI you already have signed in, so your subscription pays for it — no
-          API key, and the app never sees your credentials.
+          BunView uses your subscription and the app never sees your credentials.
         </p>
 
         <div className="mt-6 flex flex-col gap-3">
@@ -26,7 +25,7 @@ export function ProviderPicker({ onChoose }: { onChoose: (id: ProviderId) => voi
         </div>
 
         <p className="mt-6 text-xs text-slate-600">
-          You can switch later from the header. Nothing is contacted until you choose.
+          You can switch later from the header.
         </p>
       </div>
     </main>

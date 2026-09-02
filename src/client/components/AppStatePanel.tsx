@@ -42,7 +42,7 @@ export function AppStatePanel({ state }: { state: AppState }) {
       </div>
 
       <p className="text-[11px] leading-relaxed text-slate-600">
-        Written by the agent through this app’s own in-process MCP tools.
+        Written by agent MCP tools.
       </p>
     </aside>
   )

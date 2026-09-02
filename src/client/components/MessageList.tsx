@@ -72,7 +72,7 @@ export function MessageList({
 
       {messages.length === 0 && !waiting && (
         <p className="m-auto max-w-sm text-center text-sm text-slate-500">
-          Ask something. Claude runs on your subscription — no API key involved.
+          Ask something. Runs on your subscription.
         </p>
       )}
     </div>

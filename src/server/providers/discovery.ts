@@ -25,6 +25,7 @@
  */
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { managedBinaryPath } from '../install'
 
 export interface CliSpec {
   /** Command name as it appears on PATH. */
@@ -33,6 +34,14 @@ export interface CliSpec {
   npmPackage: string
   /** Path segments from the package root to the real entry point. */
   packageBin: string[]
+  /**
+   * Where this app would put its own managed copy.
+   *
+   * Checked LAST, on purpose: a CLI the user installed themselves stays authoritative. Two
+   * copies of these tools share state under `~/.claude` / `~/.codex`, and quietly preferring
+   * ours over one they already configured is how a working setup starts behaving oddly.
+   */
+  managedPath?: string
 }
 
 export interface Discovery {
@@ -181,7 +190,11 @@ async function runDiscovery(spec: CliSpec, override?: string): Promise<Discovery
   }
 
   // 3. Well-known locations, for the GUI-launch case.
-  for (const candidate of candidates(spec)) {
+  // 4. Then this app's own managed copy — last, so a user's install always wins.
+  const rungs = [...candidates(spec)]
+  if (spec.managedPath) rungs.push(spec.managedPath)
+
+  for (const candidate of rungs) {
     searched.push(candidate)
     if (await exists(candidate)) {
       return { argv: toArgv(candidate), path: candidate, searched, unresolvedShim: null }
@@ -195,10 +208,12 @@ export const CLAUDE_SPEC: CliSpec = {
   binary: 'claude',
   npmPackage: '@anthropic-ai/claude-code',
   packageBin: ['bin', IS_WIN ? 'claude.exe' : 'claude'],
+  managedPath: managedBinaryPath('claude'),
 }
 
 export const CODEX_SPEC: CliSpec = {
   binary: 'codex',
   npmPackage: '@openai/codex',
   packageBin: ['bin', 'codex.js'],
+  managedPath: managedBinaryPath('codex'),
 }

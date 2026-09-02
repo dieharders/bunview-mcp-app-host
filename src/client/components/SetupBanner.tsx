@@ -26,7 +26,7 @@ export function SetupBanner({
   const abortRef = useRef<AbortController | null>(null)
 
   // Abandon an in-flight install if the user switches provider or the app closes; the server
-  // sees the disconnect and kills npm.
+  // sees the disconnect and aborts the download.
   useEffect(() => () => abortRef.current?.abort(), [])
   useEffect(() => {
     setLog([])
@@ -44,7 +44,7 @@ export function SetupBanner({
       try {
         for await (const event of installCli(provider, ac.signal)) {
           if (event.type === 'log') {
-            // Bounded: `npm install` is chatty and this is a banner, not a terminal.
+            // Bounded: this is a banner, not a terminal.
             setLog((prev) => [...prev, event.line].slice(-200))
           } else {
             setNote(event.message)
@@ -106,8 +106,9 @@ export function SetupBanner({
         {missing && (
           <>
             <p>
-              {info.label} isn’t installed. BunView can install it for you — this runs{' '}
-              <Code>npm install -g {info.npmPackage}</Code> on your machine.
+              {info.label} isn’t installed. BunView can download {info.vendor}’s own signed binary
+              and verify its checksum — no npm, no Node, no admin rights. It goes in BunView’s data
+              folder, not on your PATH, so uninstalling is deleting a folder.
             </p>
             {auth.unresolvedShim && (
               <p className="mt-1.5">

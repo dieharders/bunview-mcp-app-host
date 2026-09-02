@@ -83,7 +83,9 @@ export interface ProviderInfo {
   label: string
   /** The subscription this runs on, for the picker. */
   plan: string
-  /** npm package that provides the CLI, shown before we offer to install it. */
+  /** Who publishes it, named in the install prompt so consent knows whose binary it is. */
+  vendor: string
+  /** npm package that provides the CLI. Kept for discovery's path layout, not for installing. */
   npmPackage: string
   /** Command the user would type to sign in, shown in the setup banner. */
   loginCommand: string
@@ -95,6 +97,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   claude: {
     id: 'claude',
     label: 'Claude Code',
+    vendor: 'Anthropic',
     plan: 'Claude Pro or Max',
     npmPackage: '@anthropic-ai/claude-code',
     loginCommand: 'claude auth login',
@@ -103,14 +106,14 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   codex: {
     id: 'codex',
     label: 'Codex',
+    vendor: 'OpenAI',
     plan: 'ChatGPT Plus, Pro or Business',
     npmPackage: '@openai/codex',
     loginCommand: 'codex login',
     // Stated in the picker rather than discovered later. Note what this does NOT say: Codex's
     // OWN tools — shell, file edits, web search, any MCP server the user has configured — work
     // fine and show up as tool chips. What is missing is BunView's own tools; see codex.ts.
-    caveat:
-      'Replies arrive per message rather than token by token, and BunView’s own tools aren’t wired up yet (Codex’s built-in tools still work).',
+    caveat: 'Replies arrive per message rather than token by token.',
   },
 }
 
@@ -132,8 +135,8 @@ export type AuthResponse =
       state: 'cli_missing'
       searched: string[]
       unresolvedShim: string | null
-      /** Whether to offer an Install button. Decided on the server: it depends on npm being
-       *  present there, which the browser cannot know. */
+      /** Whether to offer an Install button. Decided on the server, whose preconditions
+       *  (and BUNVIEW_ALLOW_INSTALL) the browser cannot see. */
       canInstall: boolean
     }
   | { state: 'unknown' }

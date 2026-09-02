@@ -12,8 +12,7 @@
  */
 import type { AuthResponse } from '../shared/events'
 import { getProvider } from './providers'
-import { installCommand } from './setup'
-import { config } from './config'
+import { canInstall } from './setup'
 
 export async function handleAuth(req: Request): Promise<Response> {
   const provider = getProvider(new URL(req.url).searchParams.get('provider'))
@@ -24,9 +23,9 @@ export async function handleAuth(req: Request): Promise<Response> {
       state: 'cli_missing',
       searched: detection.searched,
       unresolvedShim: detection.unresolvedShim,
-      // Whether to offer the Install button at all. Decided here, not in the browser, because
-      // it depends on npm being present on THIS machine.
-      canInstall: config.allowInstall && installCommand(provider.id) !== null,
+      // Whether to offer the Install button at all. Decided on the server because the
+      // preconditions are the server's to know.
+      canInstall: canInstall(provider.id),
     } satisfies AuthResponse)
   }
 

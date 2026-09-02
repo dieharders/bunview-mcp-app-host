@@ -2,14 +2,17 @@
  * Setup actions: install a missing CLI, and start a sign-in.
  *
  * These are the only two things in this app that reach outside its own process to change the
- * user's machine, so both are gated: the UI shows the exact command before running it, and
- * neither happens without an explicit click. `BUNVIEW_ALLOW_INSTALL=0` removes the install
- * path entirely for managed or offline deployments.
+ * user's machine, so both are gated: the UI names exactly what will happen — the vendor, the
+ * version, the size and the SHA-256 for a download; the exact command for a sign-in — and
+ * neither happens without an explicit click. Nothing auto-installs: Cursor shipped a silent
+ * auto-install of its agent in 1.6.26 and reverted it in 1.7 after user pushback.
+ * `BUNVIEW_ALLOW_INSTALL=0` removes the install path entirely for managed or offline builds.
  */
 import { PROVIDERS, type ProviderId, type SetupEvent } from '../shared/events'
 import { config } from './config'
 import { childEnv } from './env'
-import { readLines } from './providers/ndjson'
+import { ChecksumError } from './install/download'
+import { installManaged } from './install'
 import { resetDiscovery } from './providers/discovery'
 import { getProvider } from './providers'
 import { HEARTBEAT_MS, PING, SSE_HEADERS } from './sse'
@@ -25,19 +28,17 @@ function providerFrom(body: unknown): ProviderId | null {
 }
 
 /**
- * The command that installs a provider's CLI.
+ * Whether a managed install is possible here.
  *
- * npm rather than bun: both packages publish per-platform binaries through npm's
- * `optionalDependencies`, and `npm install -g` is what puts the shim on PATH in the layout
- * that `discovery.ts` knows how to resolve.
+ * Always true in principle — it is an HTTPS download plus a SHA-256 check, with no npm, Node,
+ * shell or admin rights involved — so this exists only so `BUNVIEW_ALLOW_INSTALL=0` and any
+ * future precondition have one place to say no.
  */
-export function installCommand(provider: ProviderId): string[] | null {
-  const npm = Bun.which('npm')
-  if (!npm) return null
-  return [npm, 'install', '-g', PROVIDERS[provider].npmPackage]
+export function canInstall(_provider: ProviderId): boolean {
+  return config.allowInstall
 }
 
-/** POST /api/install — run the install, streaming npm's output as it goes. */
+/** POST /api/install — download the vendor's binary, streaming progress as it goes. */
 export async function handleInstall(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => null)) as unknown
   const provider = providerFrom(body)
@@ -51,18 +52,6 @@ export async function handleInstall(req: Request): Promise<Response> {
         message: 'Installing is disabled in this build.',
       } satisfies SetupEvent,
       { status: 403 },
-    )
-  }
-
-  const cmd = installCommand(provider)
-  if (!cmd) {
-    return Response.json(
-      {
-        type: 'done',
-        ok: false,
-        message: 'npm was not found. Install Node.js, or install the CLI yourself.',
-      } satisfies SetupEvent,
-      { status: 412 },
     )
   }
 
@@ -88,62 +77,41 @@ export async function handleInstall(req: Request): Promise<Response> {
         }
       }
 
-      send({ type: 'log', line: `$ ${cmd.join(' ')}` })
+      const timer = setTimeout(() => ac.abort(), INSTALL_TIMEOUT_MS)
 
-      let proc: Bun.Subprocess<'ignore', 'pipe', 'pipe'> | null = null
       try {
-        proc = Bun.spawn(cmd, {
-          stdin: 'ignore',
-          stdout: 'pipe',
-          stderr: 'pipe',
-          env: childEnv(),
-          windowsHide: true,
-        })
+        const path = await installManaged(provider, ac.signal, (line) =>
+          send({ type: 'log', line }),
+        )
 
-        const timer = setTimeout(() => proc?.kill(), INSTALL_TIMEOUT_MS)
-        const onAbort = () => proc?.kill()
-        ac.signal.addEventListener('abort', onAbort, { once: true })
-
-        // npm writes progress to stderr and results to stdout; the user wants both, in order
-        // of arrival, so they are drained concurrently rather than sequentially.
-        const pump = async (s: ReadableStream<Uint8Array>) => {
-          for await (const line of readLines(s)) send({ type: 'log', line })
-        }
-        await Promise.all([
-          pump(proc.stdout as ReadableStream<Uint8Array>),
-          pump(proc.stderr as ReadableStream<Uint8Array>),
-        ])
-
-        const code = await proc.exited
-        clearTimeout(timer)
-        ac.signal.removeEventListener('abort', onAbort)
-
-        // The freshly installed binary is in a location discovery already cached a miss for.
+        // The binary now sits somewhere discovery already cached a miss for.
         resetDiscovery()
 
-        if (code === 0) {
-          const found = await getProvider(provider).detect()
-          send(
-            found.path
-              ? { type: 'done', ok: true, message: `Installed. Found it at ${found.path}` }
-              : {
-                  type: 'done',
-                  ok: false,
-                  message:
-                    'Install finished but the command still is not on PATH. Try restarting BunView.',
-                },
-          )
-        } else {
-          send({
-            type: 'done',
-            ok: false,
-            message: `npm exited with code ${code}. See the log above.`,
-          })
-        }
+        const found = await getProvider(provider).detect()
+        send(
+          found.path
+            ? { type: 'done', ok: true, message: `Installed to ${path}` }
+            : {
+                type: 'done',
+                ok: false,
+                message: 'The download finished but the binary could not be found afterwards.',
+              },
+        )
       } catch (err) {
         console.error('[setup] install failed:', err)
-        send({ type: 'done', ok: false, message: 'Could not run npm. See the app log.' })
+
+        // These messages are safe to show: they are either ours, or an HTTP/checksum failure
+        // whose text we wrote. A checksum mismatch is called out specifically because it is
+        // the one failure that might not be the user's network.
+        const message =
+          err instanceof ChecksumError
+            ? 'The download did not match the checksum the vendor published, so it was discarded.'
+            : ac.signal.aborted
+              ? 'Install cancelled.'
+              : `Install failed: ${err instanceof Error ? err.message : 'unknown error'}`
+        send({ type: 'done', ok: false, message })
       } finally {
+        clearTimeout(timer)
         clearInterval(heartbeat)
         try {
           controller.close()

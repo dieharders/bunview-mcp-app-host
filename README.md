@@ -32,8 +32,8 @@ A window opens and asks which plan to connect — Claude Code or Codex. **Nothin
 until you choose**, because probing a vendor means spawning their CLI to read your account.
 
 From there the app walks you the rest of the way: if the CLI is missing it offers to install
-it (showing the exact `npm install -g` command first), and if it is installed but signed out
-it offers a Sign in button. Once the header badge shows your plan, the composer unlocks.
+it — downloading the vendor's own signed binary and verifying its checksum, no npm or Node
+required — and if it is installed but signed out it offers a Sign in button. Once the header badge shows your plan, the composer unlocks.
 
 The right-hand panel shows app state the agent can write to through this app's own MCP tools.
 Try: **“Set the app status to hello and add a note.”** The panel updates as it answers.
@@ -47,11 +47,22 @@ Try: **“Set the app status to hello and add a note.”** The panel updates as 
 | Streaming       | token by token              | **per message**               |
 | App's MCP tools | yes, in-process             | **no**                        |
 
-Both differences are stated on the picker rather than discovered later. `codex exec --json`
-emits completed items rather than token deltas, and `createSdkMcpServer` — which is what lets
-a tool mutate this app's live state with no IPC — is a Claude Agent SDK facility. Wiring
-Codex's own MCP config would put a process boundary between the tools and the app's state, so
-it is left undone rather than faked.
+Both differences are stated on the picker rather than discovered later.
+
+To be precise about the second row: **Codex's own tools work fine** — shell, file edits, web
+search, and any MCP server you have configured are all mapped to tool chips. What is missing
+is _BunView's_ tools, and the reason is the registration channel rather than the tools. The
+Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to
+drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the
+handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no
+channel to answer on.
+
+It is still doable: Codex reads MCP servers from `~/.codex/config.toml`, and a `url` entry
+there uses streamable HTTP, so BunView could serve `POST /mcp` from the Bun server it already
+runs and keep the tools in-process after all. The costs are what stopped it — it writes to the
+user's **global** config rather than being scoped to a session, it currently needs
+`experimental_use_rmcp_client = true`, and it means implementing the MCP wire protocol rather
+than calling a helper.
 
 > The Codex provider is written against OpenAI's published CLI reference and has **not** been
 > exercised against a real `codex` install. Its event mapping is deliberately tolerant, so an
@@ -65,19 +76,19 @@ I want to build a minimal scaffold project that will serve as a starting point f
 Requirements:
 
 - Use Bun.js for the server component
-- WebView for the frontend UI (a hosted webui, I would like to be able to pin a specific version of the ui). Make a very simple UI for now just to show the AI response for now.
+- WebView for the frontend UI. Make a very simple UI for now just to show the AI response for now.
 - Integrate with the subscription based AI (not api, start with Claude for now). I believe we need to spawn a `claude cli` process to accomplish this?
 - A simple example of streaming response from AI agent
 
 ## Prerequisites
 
-|             |                                                                                                    |
-| ----------- | -------------------------------------------------------------------------------------------------- |
-| Bun         | ≥ 1.3.9 (`--watch=always` is used in dev)                                                          |
-| Claude Code | `npm install -g @anthropic-ai/claude-code`, then `claude auth login`                               |
-| Windows     | WebView2 runtime — preinstalled on Windows 11 and current Windows 10                               |
-| macOS       | Nothing; WKWebView is built in                                                                     |
-| Linux       | GTK 4 + WebKitGTK 6 — `apt install libgtk-4-1 libwebkitgtk-6.0-4` / `pacman -S gtk4 webkitgtk-6.0` |
+|             |                                                                                                                                  |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| Bun         | ≥ 1.3.9 (`--watch=always` is used in dev)                                                                                        |
+| Claude Code | none — the app can install it. Or `curl -fsSL https://claude.ai/install.sh \| bash` / `irm https://claude.ai/install.ps1 \| iex` |
+| Windows     | WebView2 runtime — preinstalled on Windows 11 and current Windows 10                                                             |
+| macOS       | Nothing; WKWebView is built in                                                                                                   |
+| Linux       | GTK 4 + WebKitGTK 6 — `apt install libgtk-4-1 libwebkitgtk-6.0-4` / `pacman -S gtk4 webkitgtk-6.0`                               |
 
 Desktop only. The whole design spawns a local process, which iOS and Android forbid; a mobile
 client would need this server hosted somewhere and a remote auth story instead.
@@ -94,7 +105,8 @@ it and bills API credits instead — silently, with no visible symptom until the
 `ANTHROPIC_BASE_URL`, the Bedrock/Vertex switches) from the child environment. Set
 `BUNVIEW_ALLOW_API_KEY=1` to opt back in deliberately.
 
-`GET /api/auth` shells `claude auth status --json` and reports which credential is actually in
+`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`,
+`codex login status`) and reports which credential is actually in
 play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key
 — usage is billed per token”_ when it is not.
 
@@ -119,9 +131,10 @@ export const appToolsServer = createSdkMcpServer({
 
 `createSdkMcpServer` runs these **in this process**. The handlers close over
 [`src/server/state.ts`](src/server/state.ts), so a tool call mutates the same object the UI is
-rendering — no IPC, no serialization boundary, no protocol to design. Pointing `--mcp-config`
-at a separate stdio or HTTP server would put a process boundary between the agent's tools and
-your app's state and force you to build across it.
+rendering — no IPC, no serialization boundary, no protocol to design, and nothing written to
+the user's global config. A stdio MCP server would instead put a process boundary between the
+agent's tools and your app's state; an HTTP one keeps them together but means implementing the
+wire protocol and registering it globally.
 
 **To fork:** delete the three toy tools, register your real domain tools. Nothing else changes.
 
@@ -209,10 +222,42 @@ the moment the answer finishes.
 Two endpoints reach outside the app's own process, and both are gated behind an explicit click
 that shows what will run first:
 
-- **`POST /api/install`** runs `npm install -g <package>` and streams npm's output back as SSE,
-  because a button that does nothing visible for thirty seconds is indistinguishable from a
-  broken one. Afterwards it clears the discovery cache and re-detects, so the freshly installed
-  binary is found without a restart. `BUNVIEW_ALLOW_INSTALL=0` removes the button entirely.
+- **`POST /api/install`** downloads the vendor's own signed binary into BunView's data folder
+  and verifies its SHA-256, streaming progress back as SSE. Afterwards it clears the discovery
+  cache and re-detects, so the new binary is found without a restart.
+  `BUNVIEW_ALLOW_INSTALL=0` removes the button entirely.
+
+  **Why not `npm install -g`**, which this replaced — three independent reasons:
+
+  1. **Anthropic deprecated it.** Their README says so outright: _"Installation via npm is
+     deprecated. Use one of the recommended methods below."_ It is also the only listed method
+     that needs Node at all.
+  2. **It cannot work from a GUI app on Windows.** A process's environment block is fixed at
+     launch and [cannot be changed from outside](https://learn.microsoft.com/en-us/windows/win32/procthread/environment-variables),
+     so after `npm -g` adds a directory to PATH, this app and every child it spawns still see
+     the old PATH. "Installed successfully, but I can't find it — please restart" is the
+     _expected_ outcome there, not an edge case.
+  3. **It has the whole documented failure surface**: EACCES on global prefixes, the
+     wrong-prefix bug when several Node versions exist, corporate registries that mirror the
+     wrapper package but not the eight platform packages, and `.cmd` shims that Node refuses
+     to spawn since CVE-2024-27980.
+
+  What [`install/`](src/server/install/) does instead is what the vendors' own `install.sh` /
+  `install.ps1` do — read the release manifest, download the platform binary, verify the
+  checksum — minus the shell. No npm, no Node, no shell, no admin rights. The binaries arrive
+  Developer ID-signed and Apple-notarized (they are the vendor's, unmodified), and a file
+  fetched programmatically carries no `com.apple.quarantine`, so Gatekeeper does not gate it.
+  BunView adds no signing obligations of its own.
+
+  It installs to the app's data folder and **not** onto PATH — `%LOCALAPPDATA%\BunView`,
+  `~/Library/Application Support/BunView`, or `$XDG_DATA_HOME/BunView`. Discovery checks it
+  **last**, so a `claude` the user installed themselves stays authoritative; these tools share
+  state under `~/.claude` / `~/.codex`, and quietly preferring our copy over one they already
+  configured is how a working setup starts behaving oddly. Uninstalling is deleting the folder.
+
+  Nothing auto-installs. Cursor shipped a silent auto-install of its agent in 1.6.26 and
+  reverted it in 1.7 after user pushback.
+
 - **`POST /api/login`** opens the vendor's sign-in command **in a real terminal window** rather
   than driving it headless through pipes. Both vendors' login flows are interactive — they open
   a browser, run a localhost callback listener, and may print a code to confirm — and

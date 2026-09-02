@@ -22,6 +22,36 @@ const TARGETS = [
 const APP_NAME = 'bunview'
 const DISPLAY_NAME = 'BunView'
 const BUNDLE_ID = 'com.bunview.app'
+const PUBLISHER = 'BunView'
+
+const pkg = (await Bun.file('./package.json').json()) as { version: string; description: string }
+
+/** Windows wants a four-part numeric version; package.json carries three. */
+const WIN_VERSION = `${pkg.version.split('-')[0]}.0`
+
+/**
+ * Optional. Bun fails the build outright if `icon` names a file that is not there, so this is
+ * probed rather than assumed — drop a .ico here and it is picked up on the next build.
+ */
+const ICON_PATH = './assets/icon.ico'
+const icon = (await Bun.file(ICON_PATH).exists()) ? ICON_PATH : undefined
+
+/**
+ * Metadata Windows shows in the file's Properties tab and in the SmartScreen / UAC prompt.
+ * An unsigned binary with a blank publisher is exactly what a malicious download looks like,
+ * so filling these in is worth the two lines even before code signing.
+ *
+ * `hideConsole` is deliberately NOT set. It is the same GUI-subsystem change this file used to
+ * make by hand, and it broke every double-click launch — see the comment further down.
+ */
+const windowsMetadata = {
+  title: DISPLAY_NAME,
+  publisher: PUBLISHER,
+  version: WIN_VERSION,
+  description: pkg.description,
+  copyright: `© ${new Date().getFullYear()} ${PUBLISHER}`,
+  ...(icon ? { icon } : {}),
+}
 
 const args = process.argv.slice(2)
 const buildAll = args.includes('--all')
@@ -43,6 +73,9 @@ async function requireStylesheet() {
 }
 
 async function buildTarget(outfile: string, target?: string) {
+  // Only meaningful for a Windows output; harmless to omit everywhere else.
+  const isWindows = target ? target.includes('windows') : process.platform === 'win32'
+
   const result = await Bun.build({
     // BOTH entrypoints. `main.ts` spawns `src/server/worker.ts` as a Worker, and a
     // worker module that is not an entrypoint does not make it into the compiled binary —
@@ -51,6 +84,7 @@ async function buildTarget(outfile: string, target?: string) {
     compile: {
       outfile,
       ...(target ? { target: target as never } : {}),
+      ...(isWindows ? { windows: windowsMetadata } : {}),
     },
     minify: true,
     sourcemap: 'linked',

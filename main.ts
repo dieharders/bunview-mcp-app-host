@@ -50,6 +50,53 @@ function hideOwnConsoleWindow(): void {
   }
 }
 
+/**
+ * Give the window the executable's own icon.
+ *
+ * Windows keeps two entirely separate icons, and setting one does nothing for the other:
+ *
+ *   * the FILE icon, a resource compiled into the .exe (build.ts passes it via `windows.icon`),
+ *     which is what Explorer and a pinned shortcut display; and
+ *   * the WINDOW icon, a per-window HICON, which is what the title bar and the taskbar button
+ *     of a *running* window display.
+ *
+ * A window with no icon of its own gets a generic default — webview registers its window class
+ * without one — so the app looks unbranded while running even though the file on disk looks
+ * right. WM_SETICON is the fix, and it has to be sent once the window exists.
+ *
+ * ICON_SMALL drives the title bar, ICON_BIG the taskbar and Alt-Tab; both are needed.
+ */
+function setWindowIcon(hwnd: number | bigint | null): void {
+  if (process.platform !== 'win32' || !hwnd) return
+
+  try {
+    const shell32 = dlopen('shell32.dll', {
+      ExtractIconW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
+    })
+    const user32 = dlopen('user32.dll', {
+      SendMessageW: {
+        args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.u64],
+        returns: FFIType.u64,
+      },
+    })
+
+    // Index 0 is the first icon group in the binary, which is the one build.ts embedded.
+    // Under `bun run` this resolves to bun.exe's icon instead — harmless in dev.
+    const exePath = Buffer.from(`${process.execPath}\0`, 'utf16le')
+    const hIcon = shell32.symbols.ExtractIconW(null, ptr(exePath), 0)
+
+    // ExtractIconW returns 1 when the file holds no icons, and 0 on failure. Neither is a
+    // usable handle, and sending either would blank the window's icon rather than set it.
+    if (!hIcon || BigInt(hIcon) <= 1n) return
+
+    const WM_SETICON = 0x0080
+    user32.symbols.SendMessageW(hwnd as never, WM_SETICON, 0n, BigInt(hIcon)) // ICON_SMALL
+    user32.symbols.SendMessageW(hwnd as never, WM_SETICON, 1n, BigInt(hIcon)) // ICON_BIG
+  } catch {
+    // Cosmetic. A default icon is not worth failing a launch over.
+  }
+}
+
 const headless = process.argv.includes('--headless')
 
 // The specifier MUST stay a plain string literal, and this file MUST stay at the repo root.
@@ -111,6 +158,10 @@ if (headless) {
     const webview = new Webview()
     webview.title = 'BunView'
     webview.size = { width: 1100, height: 780, hint: 0 } // 0 = SizeHint.NONE (resizable)
+
+    // After construction, so the HWND exists; before run(), which never returns.
+    setWindowIcon(webview.unsafeWindowHandle)
+
     webview.navigate(url)
 
     // Only now, with a real window about to appear. If the webview had failed instead, we

@@ -33,5 +33,10 @@ declare module 'webview-bun' {
     navigate(url: string): void
     /** Blocks on a native event loop until the window is closed. */
     run(): void
+    /**
+     * The platform's native window handle — an HWND on Windows. Needed to set the window's
+     * icon, which Windows does not inherit from the executable's own icon resource.
+     */
+    readonly unsafeWindowHandle: number | bigint | null
   }
 }

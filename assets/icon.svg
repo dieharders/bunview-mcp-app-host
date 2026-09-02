@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" role="img" aria-label="BunView">
+  <title>BunView</title>
+
+  <!--
+    App icon: a window (three title-bar dots) holding a bun.
+
+    Built to survive rasterisation down to 16x16, which is the size that actually decides
+    whether an icon works. Everything here is a large, high-contrast silhouette: two shapes
+    for the bun, three dots for the window. No strokes, no small detail, no text — a 1px
+    stroke at 256 disappears entirely at 16, and thin gaps fill in with anti-aliasing.
+
+    Convert with all sizes in one .ico: 256, 128, 64, 48, 32, 16.
+  -->
+
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3E3661" />
+      <stop offset="1" stop-color="#201C33" />
+    </linearGradient>
+    <linearGradient id="crown" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FDF1DE" />
+      <stop offset="1" stop-color="#EFCE9C" />
+    </linearGradient>
+    <linearGradient id="base" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F3D6A8" />
+      <stop offset="1" stop-color="#E0B478" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded tile. 56 radius matches the Windows/macOS app-tile convention. -->
+  <rect width="256" height="256" rx="56" fill="url(#tile)" />
+
+  <!-- Title bar: the "view" half of the name. Dimmed so the bun stays the subject. -->
+  <g fill="#FDF1DE" opacity="0.45">
+    <circle cx="54" cy="52" r="9" />
+    <circle cx="84" cy="52" r="9" />
+    <circle cx="114" cy="52" r="9" />
+  </g>
+
+  <!-- Bun crown: a dome with a flat underside, so the gap below it stays a clean line. -->
+  <path d="M44 158 C44 108 81 82 128 82 C175 82 212 108 212 158 Z" fill="url(#crown)" />
+
+  <!-- Bun base. The 12px gap reads as a bun at 256 and as a single mass at 16 — both fine. -->
+  <rect x="44" y="170" width="168" height="42" rx="17" fill="url(#base)" />
+</svg>

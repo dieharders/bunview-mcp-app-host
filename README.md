@@ -34,6 +34,18 @@ can write to through this app's own MCP tools.
 
 Try: **“Set the app status to hello and add a note.”** The panel updates as it answers.
 
+## Dev's Notes
+
+Goal:
+I want to build a minimal scaffold project that will serve as a starting point for my future MCP apps. This project is a native app that can be installed on desktop (Windows, MacOS, Linux, maybe mobile too?). It's main responsibility is to provide a mechanism to interface with a user's subscription AI plan.
+
+Requirements:
+
+- Use Bun.js for the server component
+- WebView for the frontend UI (a hosted webui, I would like to be able to pin a specific version of the ui). Make a very simple UI for now just to show the AI response for now.
+- Integrate with the subscription based AI (not api, start with Claude for now). I believe we need to spawn a `claude cli` process to accomplish this?
+- A simple example of streaming response from AI agent
+
 ## Prerequisites
 
 |             |                                                                                                    |

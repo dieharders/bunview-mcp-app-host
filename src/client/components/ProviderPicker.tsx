@@ -24,9 +24,7 @@ export function ProviderPicker({ onChoose }: { onChoose: (id: ProviderId) => voi
           ))}
         </div>
 
-        <p className="mt-6 text-xs text-slate-600">
-          You can switch later from the header.
-        </p>
+        <p className="mt-6 text-xs text-slate-600">You can switch later from the header.</p>
       </div>
     </main>
   )
@@ -46,7 +44,7 @@ function ProviderCard({ id, onChoose }: { id: ProviderId; onChoose: (id: Provide
     >
       <span className="text-sm font-medium text-slate-100">{info.label}</span>
       <span className="text-xs text-slate-400">Runs on {info.plan}</span>
-      <code className="mt-1 w-fit rounded bg-black/30 px-1.5 py-0.5 font-mono text-[11px] text-slate-500">
+      <code className="mt-1 w-fit rounded-sm bg-black/30 px-1.5 py-0.5 font-mono text-[11px] text-slate-500">
         {info.npmPackage}
       </code>
       {/* Said here rather than discovered later: a limitation the user meets after committing

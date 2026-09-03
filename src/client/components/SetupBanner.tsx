@@ -136,7 +136,7 @@ export function SetupBanner({
         )}
 
         {log.length > 0 && (
-          <pre className="scrollbar-slim mt-2 max-h-32 overflow-y-auto rounded-lg bg-black/30 p-2 font-mono text-[11px] leading-relaxed text-amber-200/70">
+          <pre className="mt-2 max-h-32 scrollbar-slim overflow-y-auto rounded-lg bg-black/30 p-2 font-mono text-[11px] leading-relaxed text-amber-200/70">
             {log.join('\n')}
           </pre>
         )}
@@ -170,5 +170,7 @@ export function SetupBanner({
 }
 
 function Code({ children }: { children: React.ReactNode }) {
-  return <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[11px]">{children}</code>
+  return (
+    <code className="rounded-sm bg-black/30 px-1 py-0.5 font-mono text-[11px]">{children}</code>
+  )
 }

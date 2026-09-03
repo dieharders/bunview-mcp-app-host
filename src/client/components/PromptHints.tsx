@@ -44,7 +44,7 @@ export function PromptHints({ onPick }: { onPick: (prompt: string) => void }) {
           type="button"
           onClick={() => onPick(prompt)}
           title={prompt}
-          className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2 text-left transition hover:border-brand-via/40 hover:bg-white/[0.07] focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-via/60"
+          className="group flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/3 px-3 py-2 text-left transition hover:border-brand-via/40 hover:bg-white/7 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-via/60"
         >
           <Icon
             className="size-4 shrink-0 text-slate-500 transition group-hover:text-brand-to"

@@ -28,7 +28,7 @@ export function AppStatePanel({ state }: { state: AppState }) {
         {state.notes.length === 0 ? (
           <p className="text-sm text-slate-600">— none —</p>
         ) : (
-          <ul className="scrollbar-slim mt-1 flex max-h-full flex-col gap-1.5 overflow-y-auto">
+          <ul className="mt-1 flex max-h-full scrollbar-slim flex-col gap-1.5 overflow-y-auto">
             {state.notes.map((note, i) => (
               <li
                 key={`${i}-${note}`}
@@ -41,9 +41,7 @@ export function AppStatePanel({ state }: { state: AppState }) {
         )}
       </div>
 
-      <p className="text-[11px] leading-relaxed text-slate-600">
-        Written by agent via MCP tools.
-      </p>
+      <p className="text-[11px] leading-relaxed text-slate-600">Written by agent via MCP tools.</p>
     </aside>
   )
 }

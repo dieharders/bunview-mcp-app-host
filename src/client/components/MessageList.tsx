@@ -63,7 +63,7 @@ export function MessageList({
   return (
     <div
       ref={scroller}
-      className={cn('scrollbar-slim flex flex-col gap-3 overflow-y-auto px-4 py-4', className)}
+      className={cn('flex scrollbar-slim flex-col gap-3 overflow-y-auto p-4', className)}
       aria-live="polite"
       aria-label="Conversation"
     >
@@ -77,7 +77,10 @@ export function MessageList({
 
       {messages.length === 0 && !waiting && (
         <div className="m-auto flex w-full max-w-sm flex-col gap-4">
-          <p className="text-center text-sm text-slate-500">Ask something or try a tool example below.<br /> This will use your subscription plan.</p>
+          <p className="text-center text-sm text-slate-500">
+            Ask something or try a tool example below.
+            <br /> This will use your subscription plan.
+          </p>
           {onPickPrompt && <PromptHints onPick={onPickPrompt} />}
         </div>
       )}

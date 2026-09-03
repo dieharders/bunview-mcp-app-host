@@ -1,9 +1,15 @@
 name: Release
+run-name: Release ${{ inputs.tag || github.ref_name }}
 
+# Manual only. Creating a tag does not build anything -- a release happens when
+# someone asks for one.
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.0). Leave empty to build the ref picked in "Use workflow from".'
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -28,7 +34,12 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
+      # A tag can arrive two ways: typed into the input, or picked in the
+      # "Use workflow from" dropdown. The input wins so the workflow definition
+      # can come from master while the code being built comes from the tag.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -82,6 +93,9 @@ jobs:
 
   release:
     needs: build
+    # No tag means no release to attach binaries to, so a run launched from a
+    # branch just leaves the per-target zips on the run as artifacts.
+    if: inputs.tag != '' || github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -91,6 +105,7 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.tag || github.ref_name }}
           # Draft, so the release notes and the binaries can be checked before anyone
           # downloads them.
           draft: true

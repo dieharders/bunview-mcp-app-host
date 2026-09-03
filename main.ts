@@ -6,7 +6,51 @@
  * nothing else for the life of the app. The window therefore gets the main thread and the
  * server gets a Worker — inverting this does not work.
  */
-import { dlopen, FFIType, ptr } from 'bun:ffi'
+import { dlopen, FFIType, ptr, type Pointer } from 'bun:ffi'
+
+/**
+ * The Win32 entry points this file needs, opened once and shared.
+ *
+ * `dlopen` on the same DLL twice yields two independent library objects and two symbol tables
+ * for one library, which is what this file used to do: user32 opened in one function for
+ * ShowWindow and again in another for SendMessageW. One bundle keeps a single handle per DLL,
+ * and gives the next Win32 call somewhere obvious to go.
+ *
+ * Opened lazily, because dlopen resolves its symbols eagerly — doing this at module load would
+ * throw on macOS and Linux, where none of these libraries exist. Nothing is ever closed: the
+ * handles are wanted for the life of the process, and all three DLLs are already mapped into
+ * every Windows process regardless.
+ *
+ * Both callers run inside a try/catch, so a failure here degrades to a visible console or a
+ * default icon rather than a failed launch.
+ */
+let win32Libs: ReturnType<typeof openWin32> | null = null
+
+function openWin32() {
+  return {
+    kernel32: dlopen('kernel32.dll', {
+      GetConsoleWindow: { args: [], returns: FFIType.ptr },
+      GetConsoleProcessList: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
+    }),
+    user32: dlopen('user32.dll', {
+      ShowWindow: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
+      SendMessageW: {
+        args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.u64],
+        returns: FFIType.u64,
+      },
+    }),
+    shell32: dlopen('shell32.dll', {
+      ExtractIconExW: {
+        args: [FFIType.ptr, FFIType.i32, FFIType.ptr, FFIType.ptr, FFIType.u32],
+        returns: FFIType.u32,
+      },
+    }),
+  }
+}
+
+function win32() {
+  return (win32Libs ??= openWin32())
+}
 
 /**
  * Hide the console window Windows allocates for a double-clicked executable.
@@ -30,13 +74,7 @@ function hideOwnConsoleWindow(): void {
   if (process.platform !== 'win32') return
 
   try {
-    const kernel32 = dlopen('kernel32.dll', {
-      GetConsoleWindow: { args: [], returns: FFIType.ptr },
-      GetConsoleProcessList: { args: [FFIType.ptr, FFIType.u32], returns: FFIType.u32 },
-    })
-    const user32 = dlopen('user32.dll', {
-      ShowWindow: { args: [FFIType.ptr, FFIType.i32], returns: FFIType.i32 },
-    })
+    const { kernel32, user32 } = win32()
 
     const hwnd = kernel32.symbols.GetConsoleWindow()
     if (!hwnd) return // no console attached — nothing to hide
@@ -64,34 +102,54 @@ function hideOwnConsoleWindow(): void {
  * without one — so the app looks unbranded while running even though the file on disk looks
  * right. WM_SETICON is the fix, and it has to be sent once the window exists.
  *
- * ICON_SMALL drives the title bar, ICON_BIG the taskbar and Alt-Tab; both are needed.
+ * ICON_SMALL drives the title bar, ICON_BIG the taskbar and Alt-Tab. They are two handles at
+ * two sizes, not one handle sent twice — see the ExtractIconExW note below.
+ *
+ * Takes the webview rather than its handle. Reading `unsafeWindowHandle` is itself an FFI call
+ * into the webview library, so as a caller's argument expression it sat OUTSIDE this function's
+ * try/catch: a throw there would escape to the caller AFTER the native window had already been
+ * created, leaving an unpainted window on screen and a process that reaches neither run() nor
+ * exit().
  */
-function setWindowIcon(hwnd: number | bigint | null): void {
-  if (process.platform !== 'win32' || !hwnd) return
+function setWindowIcon(webview: { readonly unsafeWindowHandle: Pointer | bigint | null }): void {
+  if (process.platform !== 'win32') return
 
   try {
-    const shell32 = dlopen('shell32.dll', {
-      ExtractIconW: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32], returns: FFIType.ptr },
-    })
-    const user32 = dlopen('user32.dll', {
-      SendMessageW: {
-        args: [FFIType.ptr, FFIType.u32, FFIType.u64, FFIType.u64],
-        returns: FFIType.u64,
-      },
-    })
+    const hwnd = webview.unsafeWindowHandle
+    if (!hwnd) return
+
+    const { shell32, user32 } = win32()
 
     // Index 0 is the first icon group in the binary, which is the one build.ts embedded.
     // Under `bun run` this resolves to bun.exe's icon instead — harmless in dev.
     const exePath = Buffer.from(`${process.execPath}\0`, 'utf16le')
-    const hIcon = shell32.symbols.ExtractIconW(null, ptr(exePath), 0)
 
-    // ExtractIconW returns 1 when the file holds no icons, and 0 on failure. Neither is a
-    // usable handle, and sending either would blank the window's icon rather than set it.
-    if (!hIcon || BigInt(hIcon) <= 1n) return
+    // ExtractIconExW, not ExtractIconW: the latter only ever returns the LARGE icon, sized to
+    // SM_CXICON (32px). Sending that as ICON_SMALL made Windows downscale it to 16 for the
+    // title bar rather than use the 16x16 entry assets/icon.ico carries — which is the size
+    // the artwork was drawn to survive. ExtractIconExW fills both, each at its own metric.
+    //
+    // The out-parameters receive HICONs, so they are pointer-sized; windows-x64 is the only
+    // Windows target.
+    const large = new BigUint64Array(1)
+    const small = new BigUint64Array(1)
+    const extracted = shell32.symbols.ExtractIconExW(ptr(exePath), 0, ptr(large), ptr(small), 1)
+
+    // The number of icons extracted, or 0xFFFFFFFF if the file could not be found; 0 means the
+    // file holds none. Neither failure leaves a usable handle behind.
+    if (extracted === 0 || extracted === 0xffff_ffff) return
 
     const WM_SETICON = 0x0080
-    user32.symbols.SendMessageW(hwnd as never, WM_SETICON, 0n, BigInt(hIcon)) // ICON_SMALL
-    user32.symbols.SendMessageW(hwnd as never, WM_SETICON, 1n, BigInt(hIcon)) // ICON_BIG
+    const ICON_SMALL = 0n
+    const ICON_BIG = 1n
+
+    // Either slot comes back null if the .ico lacks that size. A null would blank the window's
+    // icon rather than set it, so skip instead of sending it.
+    if (small[0]) user32.symbols.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, small[0])
+    if (large[0]) user32.symbols.SendMessageW(hwnd, WM_SETICON, ICON_BIG, large[0])
+
+    // The HICONs are deliberately not destroyed: the window uses them for as long as it exists,
+    // and the process owns them until it exits.
   } catch {
     // Cosmetic. A default icon is not worth failing a launch over.
   }
@@ -159,8 +217,9 @@ if (headless) {
     webview.title = 'BunView'
     webview.size = { width: 1100, height: 780, hint: 0 } // 0 = SizeHint.NONE (resizable)
 
-    // After construction, so the HWND exists; before run(), which never returns.
-    setWindowIcon(webview.unsafeWindowHandle)
+    // After construction, so the HWND exists; before run(), which does not return until the
+    // user closes the window.
+    setWindowIcon(webview)
 
     webview.navigate(url)
 

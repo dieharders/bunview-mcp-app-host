@@ -9,7 +9,9 @@
  * Run `bun run build` rather than this directly — it generates the stylesheet first, which
  * is an INPUT to the bundle (see the precondition gate below).
  */
-export {}
+import { z } from 'zod'
+
+import { buildIcns, largestPng, readIcoAsPngs } from './build-icons'
 
 const TARGETS = [
   { name: 'darwin-arm64', target: 'bun-darwin-arm64', ext: '' },
@@ -24,33 +26,82 @@ const DISPLAY_NAME = 'BunView'
 const BUNDLE_ID = 'com.bunview.app'
 const PUBLISHER = 'BunView'
 
-const pkg = (await Bun.file('./package.json').json()) as { version: string; description: string }
-
-/** Windows wants a four-part numeric version; package.json carries three. */
-const WIN_VERSION = `${pkg.version.split('-')[0]}.0`
+/**
+ * Fixed, not `new Date().getFullYear()`. This string is compiled into the executable's
+ * VERSIONINFO resource, so a wall-clock year would make the same commit produce different
+ * bytes on either side of New Year's Eve: a downloaded release could no longer be checked
+ * against a local rebuild, and re-running the release workflow on an old tag would silently
+ * change the artifact. Bump it by hand.
+ */
+const COPYRIGHT_YEAR = '2026'
 
 /**
- * Optional. Bun fails the build outright if `icon` names a file that is not there, so this is
- * probed rather than assumed — drop a .ico here and it is picked up on the next build.
+ * Parsed, not asserted. `as { version: string; description: string }` claims a shape without
+ * checking it, and npm treats both fields as optional: a missing `description` would reach the
+ * VERSIONINFO resource as `undefined` while TypeScript still reported it as a string, and a
+ * missing `version` would throw a raw TypeError out of WIN_VERSION below — at module load,
+ * before any of this file's error paths could print something actionable.
+ *
+ * The version pattern is what makes WIN_VERSION safe: it guarantees a dot-separated numeric
+ * prefix, so the four parts Windows ends up with are always numbers.
  */
-const ICON_PATH = './assets/icon.ico'
-const icon = (await Bun.file(ICON_PATH).exists()) ? ICON_PATH : undefined
+const PackageSchema = z.object({
+  version: z.string().regex(/^\d+(\.\d+)*([-+].*)?$/, 'must start with dot-separated numbers'),
+  description: z.string().min(1),
+})
+
+const parsedPkg = PackageSchema.safeParse(await Bun.file('./package.json').json())
+if (!parsedPkg.success) {
+  console.error('✗ package.json is missing or malformed where the build reads it:')
+  for (const issue of parsedPkg.error.issues) {
+    console.error(`  ${issue.path.join('.') || '(root)'}: ${issue.message}`)
+  }
+  process.exit(1)
+}
+const pkg = parsedPkg.data
+
+/**
+ * Windows wants exactly four numeric parts; package.json carries SemVer, which can be shorter
+ * (`1.0`) and can carry a suffix — a prerelease after `-`, build metadata after `+`. Dropping
+ * both suffixes and padding to four turns `1.0.0-beta.1`, `0.1.0+abc1234` and `1.0` into
+ * versions Windows accepts, rather than a string it rejects or shows verbatim in Properties.
+ */
+const WIN_VERSION = pkg.version
+  .split(/[-+]/)[0]
+  .split('.')
+  .concat('0', '0', '0')
+  .slice(0, 4)
+  .join('.')
+
+/**
+ * The single icon artefact. Every platform's icon comes from it: Windows embeds it in the
+ * executable's resources, and build-icons.ts re-encodes it into a .icns for the macOS bundle
+ * and a .png for the Linux desktop entry.
+ *
+ * Resolved against this file rather than the CWD, so a build started from a subdirectory still
+ * finds it. A missing file is a build error (requireIcon below) rather than a silent
+ * downgrade — a release .exe wearing Bun's default console icon looks fine in CI and is only
+ * noticed once somebody downloads it.
+ */
+const ICON_PATH = `${import.meta.dir}/assets/icon.ico`
 
 /**
  * Metadata Windows shows in the file's Properties tab and in the SmartScreen / UAC prompt.
  * An unsigned binary with a blank publisher is exactly what a malicious download looks like,
- * so filling these in is worth the two lines even before code signing.
- *
- * `hideConsole` is deliberately NOT set. It is the same GUI-subsystem change this file used to
- * make by hand, and it broke every double-click launch — see the comment further down.
+ * so filling these in is worth the lines even before code signing.
  */
 const windowsMetadata = {
   title: DISPLAY_NAME,
   publisher: PUBLISHER,
   version: WIN_VERSION,
   description: pkg.description,
-  copyright: `© ${new Date().getFullYear()} ${PUBLISHER}`,
-  ...(icon ? { icon } : {}),
+  copyright: `© ${COPYRIGHT_YEAR} ${PUBLISHER}`,
+  icon: ICON_PATH,
+  // Pinned rather than left to Bun's default. `hideConsole: true` is the same GUI-subsystem
+  // change this file used to make by hand, and it broke every double-click launch — see the
+  // comment further down. Nothing in CI ever launches the binary, so a flipped default in a
+  // future Bun release would ship silently; one explicit `false` makes that impossible.
+  hideConsole: false,
 }
 
 const args = process.argv.slice(2)
@@ -68,6 +119,16 @@ async function requireStylesheet() {
   if (!(await css.exists()) || css.size < 1024) {
     console.error('✗ src/client/styles/generated.css is missing or empty.')
     console.error('  Run `bun run build:css` first, or use `bun run build` which chains them.')
+    process.exit(1)
+  }
+}
+
+/** Same reasoning, for the other input nobody would notice was missing until download time. */
+async function requireIcon() {
+  if (!(await Bun.file(ICON_PATH).exists())) {
+    console.error(`✗ ${ICON_PATH} is missing.`)
+    console.error('  It is the source for the Windows, macOS and Linux icons alike. Restore it')
+    console.error('  from git, or rebuild it from assets/icon.svg at 256, 128, 64, 48, 32, 16.')
     process.exit(1)
   }
 }
@@ -100,12 +161,13 @@ async function buildTarget(outfile: string, target?: string) {
  * The Windows executable is deliberately left on the CONSOLE subsystem.
  *
  * This file used to patch the PE Subsystem field from CONSOLE (3) to WINDOWS (2) — the
- * `editbin /SUBSYSTEM:WINDOWS` trick — to keep a console window from appearing behind the
- * app. That patch made the binary unusable when double-clicked from Explorer: a GUI-subsystem
- * process launched from the shell gets NO standard handles, and Bun's Worker startup dies
- * instantly when there are none. The app exited about a millisecond in, showing no window and
- * writing nothing anywhere. It only ever "worked" when started from a terminal, a pipe, or
- * any other parent that happened to supply handles.
+ * `editbin /SUBSYSTEM:WINDOWS` trick, which is also what Bun's `hideConsole` does — to keep a
+ * console window from appearing behind the app. That patch made the binary unusable when
+ * double-clicked from Explorer: a GUI-subsystem process launched from the shell gets NO
+ * standard handles, and Bun's Worker startup dies instantly when there are none. The app
+ * exited about a millisecond in, showing no window and writing nothing anywhere. It only ever
+ * "worked" when started from a terminal, a pipe, or any other parent that happened to supply
+ * handles.
  *
  * The console window is hidden at runtime instead — see hideOwnConsoleWindow() in main.ts,
  * which also takes care not to hide a shell's console when the app is run from one.
@@ -123,6 +185,14 @@ async function makeMacApp(binaryPath: string, appDir: string) {
   copyFileSync(binaryPath, `${contentsDir}/MacOS/${APP_NAME}`)
   chmodSync(`${contentsDir}/MacOS/${APP_NAME}`, 0o755)
 
+  // Finder and the Dock read the bundle's own icon and know nothing about the icon resource
+  // compiled into the executable. Both halves are needed: the file in Resources, and the
+  // CFBundleIconFile key naming it. Without them macOS shows the generic application icon.
+  writeFileSync(
+    `${contentsDir}/Resources/${APP_NAME}.icns`,
+    buildIcns(await readIcoAsPngs(ICON_PATH)),
+  )
+
   writeFileSync(
     `${contentsDir}/Info.plist`,
     `<?xml version="1.0" encoding="UTF-8"?>
@@ -134,6 +204,7 @@ async function makeMacApp(binaryPath: string, appDir: string) {
   <key>CFBundleIdentifier</key><string>${BUNDLE_ID}</string>
   <key>CFBundleVersion</key><string>1.0</string>
   <key>CFBundleExecutable</key><string>${APP_NAME}</string>
+  <key>CFBundleIconFile</key><string>${APP_NAME}</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
@@ -152,11 +223,21 @@ async function makeMacApp(binaryPath: string, appDir: string) {
   console.log(`  → ${appDir}`)
 }
 
-async function makeLinuxDesktop(binaryPath: string, desktopPath: string) {
+async function makeLinuxDesktop(binaryPath: string, desktopPath: string, iconPath: string) {
   const { writeFileSync, existsSync } = await import('node:fs')
   const { resolve } = await import('node:path')
   if (!existsSync(binaryPath)) return
 
+  writeFileSync(iconPath, largestPng(await readIcoAsPngs(ICON_PATH)))
+  console.log(`  → ${iconPath}`)
+
+  // `Icon=` used to be the bare name `bunview`. The Desktop Entry spec resolves a bare name
+  // through the XDG icon theme — meaning a file already installed under ~/.local/share/icons
+  // or /usr/share/icons — and nothing here installs one, so every launcher fell back to a
+  // generic placeholder. An absolute path is the only file-based form the spec accepts.
+  //
+  // Like `Exec=` below it, that path is the one on the BUILD machine. Both need rewriting if
+  // the release zip is unpacked somewhere else, which is why the two files travel together.
   writeFileSync(
     desktopPath,
     `[Desktop Entry]
@@ -164,7 +245,7 @@ Type=Application
 Name=${DISPLAY_NAME}
 Comment=Chat with Claude on your subscription plan
 Exec=${resolve(binaryPath)}
-Icon=${APP_NAME}
+Icon=${resolve(iconPath)}
 Terminal=false
 Categories=Utility;Development;
 # Requires GTK 4 and WebKitGTK 6 at runtime — the webview is the system's, not bundled:
@@ -176,6 +257,7 @@ Categories=Utility;Development;
 }
 
 await requireStylesheet()
+await requireIcon()
 
 if (buildAll || targetArg) {
   const { mkdirSync } = await import('node:fs')
@@ -196,7 +278,11 @@ if (buildAll || targetArg) {
       await buildTarget(outfile, target)
       console.log(`  → ${outfile}`)
       if (name.startsWith('linux-'))
-        await makeLinuxDesktop(outfile, `dist/${APP_NAME}-${name}.desktop`)
+        await makeLinuxDesktop(
+          outfile,
+          `dist/${APP_NAME}-${name}.desktop`,
+          `dist/${APP_NAME}-${name}.png`,
+        )
     } catch (e) {
       console.error(`  ✗ Failed to build for ${name}`, e)
       process.exit(1)

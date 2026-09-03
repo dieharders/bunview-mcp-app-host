@@ -36,7 +36,13 @@ declare module 'webview-bun' {
     /**
      * The platform's native window handle — an HWND on Windows. Needed to set the window's
      * icon, which Windows does not inherit from the executable's own icon resource.
+     *
+     * `Pointer`, not `number`. bun:ffi brands its pointers (`number & { __pointer__: null }`)
+     * and a plain number is not assignable to that, so widening this to `number` forced an
+     * `as never` at the SendMessageW call in main.ts — and `never` is assignable to every
+     * parameter, which silenced the type checking on that call entirely. Swapping wParam and
+     * lParam, or passing the HICON where the HWND belongs, would have compiled clean.
      */
-    readonly unsafeWindowHandle: number | bigint | null
+    readonly unsafeWindowHandle: import('bun:ffi').Pointer | bigint | null
   }
 }

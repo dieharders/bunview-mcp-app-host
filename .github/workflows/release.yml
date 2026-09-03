@@ -67,7 +67,12 @@ jobs:
         if: startsWith(matrix.target, 'linux-')
         run: |
           cd dist
-          zip "bunview-${{ matrix.target }}.zip" "bunview-${{ matrix.target }}" "bunview-${{ matrix.target }}.desktop"
+          # The .png travels with the .desktop file: `Icon=` points at it by absolute path,
+          # which is the only file-based form the Desktop Entry spec accepts.
+          zip "bunview-${{ matrix.target }}.zip" \
+            "bunview-${{ matrix.target }}" \
+            "bunview-${{ matrix.target }}.desktop" \
+            "bunview-${{ matrix.target }}.png"
 
       - uses: actions/upload-artifact@v4
         with:

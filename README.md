@@ -306,13 +306,27 @@ bun run build        # host platform  -> ./bunview[.exe]
 bun run build:all    # five targets   -> dist/
 ```
 
-- The Windows binary is byte-patched from CONSOLE to GUI subsystem, because Bun's
-  `--windows-hide-console` is broken ([oven-sh/bun#19916]) and does not cross-compile.
-- macOS gets a `.app` bundle with an ad-hoc signature. Distributing to other Macs still needs a
-  Developer ID and notarization.
-- Linux gets a `.desktop` file.
+- The Windows binary stays on the **CONSOLE** subsystem and hides its own console window at
+  runtime (`hideOwnConsoleWindow()` in [main.ts](main.ts)). Bun's `hideConsole` — and the
+  `editbin /SUBSYSTEM:WINDOWS` byte-patch this repo used to apply by hand — strips the
+  process's standard handles, and `new Worker(...)` then dies about a millisecond into a
+  double-clicked launch with no window and no crash log ([oven-sh/bun#19916]). `build.ts` pins
+  `hideConsole: false` so a changed default cannot bring that back.
+- The Windows binary also carries an icon, version, publisher, description and copyright in its
+  VERSIONINFO resource. The _running window_ gets its icon separately, from `setWindowIcon()` in
+  [main.ts](main.ts) — Windows treats the file icon and the window icon as unrelated.
+- macOS gets a `.app` bundle with a `.icns` and an ad-hoc signature. Distributing to other Macs
+  still needs a Developer ID and notarization.
+- Linux gets a `.desktop` file plus the `.png` its `Icon=` points at. Both that path and `Exec=`
+  are absolute paths on the _build_ machine, so they need rewriting if the zip is unpacked
+  elsewhere.
+- All three icons come from the one committed `assets/icon.ico`:
+  [build-icons.ts](build-icons.ts) decodes its DIB entries and re-encodes them as PNG and ICNS,
+  so there is a single artefact to keep in step with `assets/icon.svg`.
 - Tailwind runs **before** the bundler: `generated.css` is an _input_ (the HTML links it), so
-  `build.ts` fails loudly if it is missing rather than shipping an unstyled binary.
+  `build.ts` fails loudly if it is missing rather than shipping an unstyled binary. The icon and
+  `package.json`'s `version`/`description` are gated the same way, for the same reason — a
+  missing one is invisible until someone downloads the release.
 
 The compiled binary spawns the _system_ `claude`, resolved at runtime. To ship an app that
 needs no separate CLI install, bundle the platform binary instead:

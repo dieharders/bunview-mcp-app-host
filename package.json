@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "Bun + WebView desktop app scaffold that hosts MCP tools on a Claude Code / Codex subscription.",
+  "license": "MIT",
   "scripts": {
     "dev": "bun run build:css && bun run --parallel dev:css dev:app",
     "dev:headless": "bun run build:css && bun run --parallel dev:css dev:app:headless",

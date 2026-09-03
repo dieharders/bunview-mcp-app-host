@@ -79,7 +79,6 @@ export function MessageList({
         <div className="m-auto flex w-full max-w-sm flex-col gap-4">
           <p className="text-center text-sm text-slate-500">
             Ask something or try a tool example below.
-            <br /> This will use your subscription plan.
           </p>
           {onPickPrompt && <PromptHints onPick={onPickPrompt} />}
         </div>

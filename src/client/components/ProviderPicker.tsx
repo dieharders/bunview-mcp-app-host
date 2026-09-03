@@ -15,7 +15,7 @@ export function ProviderPicker({ onChoose }: { onChoose: (id: ProviderId) => voi
       <div className="w-full max-w-lg">
         <h1 className="text-lg font-semibold text-white">Connect your AI plan</h1>
         <p className="mt-1 text-sm text-slate-400">
-          BunView uses your subscription and the app never sees your credentials.
+          BunView uses your subscription. The app never sees your credentials.
         </p>
 
         <div className="mt-6 flex flex-col gap-3">

@@ -140,24 +140,40 @@ export async function handleInstall(req: Request): Promise<Response> {
  *
  * Handing the command to a terminal delegates to the vendor's own proven interactive path. The
  * banner then says "finish signing in, then press Retry", and `GET /api/auth` is the check.
+ * A managed install lives in this app's data directory and deliberately not on PATH
+ * (see install/platform.ts).
  */
 export async function handleLogin(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => null)) as unknown
   const provider = providerFrom(body)
   if (!provider) return new Response('unknown provider', { status: 400 })
 
+  const info = PROVIDERS[provider]
   const found = await getProvider(provider).detect()
-  if (!found.path) {
+
+  // An unresolved Windows shim is spawnable HERE even though `stream` refuses it. The header
+  // on discovery.ts rejects cmd.exe for a turn because it re-parses the user's prompt and
+  // orphans the real process on cancel; a sign-in passes no user text and is meant to outlive
+  // this request in its own window, so neither objection applies. Better a working login
+  // through the shim than "not installed" for a CLI the user can see.
+  const argv =
+    found.argv.length > 0 ? found.argv : found.unresolvedShim ? [found.unresolvedShim] : []
+
+  if (argv.length === 0) {
     return Response.json(
       { type: 'done', ok: false, message: 'The CLI is not installed yet.' } satisfies SetupEvent,
       { status: 412 },
     )
   }
 
-  const command = PROVIDERS[provider].loginCommand
+  const loginArgv = [...argv, ...info.loginArgs]
+
+  // The RESOLVED command, not `info.loginCommand`. These two messages are the ones that tell
+  // the user to go type it themselves. Quoting is for reading and pasting, so it only wraps what actually needs it.
+  const command = loginArgv.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
 
   try {
-    const spawned = spawnInTerminal(command)
+    const spawned = spawnInTerminal(loginArgv)
     if (!spawned) {
       return Response.json({
         type: 'done',
@@ -181,20 +197,45 @@ export async function handleLogin(req: Request): Promise<Response> {
   }
 }
 
-/** Launch a command in whatever terminal this OS has. Returns false if none worked. */
-function spawnInTerminal(command: string): boolean {
-  const opts = { stdout: 'ignore', stderr: 'ignore', env: childEnv() } as const
+/**
+ * Wrap one argv element for a POSIX shell.
+ *
+ * Single quotes rather than escaping, because inside them every character except `'` is
+ * literal — no expansion, no globbing, no `$`. The discovered path is not user input, but it
+ * routinely contains spaces (`~/Library/Application Support/…`).
+ */
+const shQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
+
+/**
+ * Launch an argv in whatever terminal this OS has. Returns false if none worked.
+ *
+ * Takes argv rather than a command string, and that is the whole trick on Windows. The obvious
+ * version — join the parts, quote the path, hand cmd one string — cannot work: Bun escapes the
+ * inner quotes backslash-style on the way to CreateProcess, cmd.exe does not treat `\"` as an
+ * escape, and the window opens on a mangled path it says is not recognized. Passing the parts
+ * as separate arguments lets Bun quote each one on its own, which is the form cmd does parse.
+ */
+function spawnInTerminal(argv: string[]): boolean {
+  // cwd matters only cosmetically here — the login flow writes to ~/.codex, not to the working
+  // directory — but a terminal that opens in System32 (where a GUI-launched app often starts)
+  // reads like something went wrong. config.cwd is the same user-owned directory sessions run in.
+  const opts = { stdout: 'ignore', stderr: 'ignore', env: childEnv(), cwd: config.cwd } as const
 
   if (process.platform === 'win32') {
     // `start` is a cmd builtin, so it needs cmd. The empty "" is the window TITLE argument —
     // without it, `start` treats a quoted command as the title and opens an empty shell.
     // `/k` keeps the window open afterwards so the user can read the result.
-    Bun.spawn(['cmd.exe', '/c', 'start', '""', 'cmd.exe', '/k', command], opts)
+    Bun.spawn(['cmd.exe', '/c', 'start', '""', 'cmd.exe', '/k', ...argv], opts)
     return true
   }
 
+  const command = argv.map(shQuote).join(' ')
+
   if (process.platform === 'darwin') {
-    Bun.spawn(['osascript', '-e', `tell application "Terminal" to do script "${command}"`], opts)
+    // Two escaping layers, not one: `command` is already shell-safe, and this embeds it in an
+    // AppleScript string literal, where `\` and `"` are the two characters that would end it.
+    const script = command.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
+    Bun.spawn(['osascript', '-e', `tell application "Terminal" to do script "${script}"`], opts)
     Bun.spawn(['osascript', '-e', 'tell application "Terminal" to activate'], opts)
     return true
   }
@@ -209,10 +250,13 @@ function spawnInTerminal(command: string): boolean {
     'xterm',
   ]) {
     if (!Bun.which(term)) continue
+    // `exec bash` keeps the window open after the flow finishes, matching /k on Windows.
+    const payload = `${command}; exec bash`
     const args =
       term === 'gnome-terminal'
-        ? ['--', 'bash', '-lc', `${command}; exec bash`]
-        : ['-e', `bash -lc "${command}; exec bash"`]
+        ? ['--', 'bash', '-lc', payload]
+        : // `-e` takes ONE string that the terminal re-splits, so this quotes a second time.
+          ['-e', `bash -lc ${shQuote(payload)}`]
     Bun.spawn([term, ...args], opts)
     return true
   }

@@ -27,6 +27,7 @@ import { shQuote, winCommandLine } from './terminal'
 import type { ProviderDetection } from './providers/types'
 
 const IS_WIN = process.platform === 'win32'
+const IS_DARWIN = process.platform === 'darwin'
 
 afterEach(() => {
   mock.restore()
@@ -129,10 +130,11 @@ for (const provider of PROVIDER_IDS) {
       })
 
       expect(body.ok).toBe(true)
-      // Compared after this platform's own escaping rather than raw: the macOS branch doubles
-      // every backslash on its way into an AppleScript string literal, so a raw comparison
-      // passes on Windows and fails on macOS for a correct implementation.
-      expect(text).toContain(IS_WIN ? shim : shim.replaceAll('\\', '\\\\'))
+      // Compared after this platform's own escaping rather than raw. Doubling is macOS ONLY —
+      // that branch embeds the already-shell-safe command in an AppleScript string literal,
+      // where `\` would end it. Windows and Linux both pass the path through untouched, so
+      // asking for doubling anywhere but darwin fails a correct implementation.
+      expect(text).toContain(IS_DARWIN ? shim.replaceAll('\\', '\\\\') : shim)
     })
 
     test('reports not installed rather than spawning when nothing was found', async () => {

@@ -1,5 +1,6 @@
 import type {
   AppEvent,
+  AppState,
   AuthResponse,
   ChatRequest,
   ProviderId,
@@ -27,6 +28,24 @@ export async function fetchAuth(provider: ProviderId, signal?: AbortSignal): Pro
   }
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
   return (await res.json()) as AuthResponse
+}
+
+/**
+ * Clear the app state the agent wrote, server-side.
+ *
+ * The panel is cleared locally first, so this is only about the copy the SERVER holds: the
+ * one a reload re-seeds from and the one `get_app_state` reads. Without it a new conversation
+ * starts with the previous one's status still on screen.
+ */
+export async function resetAppState(): Promise<AppState> {
+  let res: Response
+  try {
+    res = await fetch('/api/state', { method: 'DELETE' })
+  } catch {
+    throw new ApiError('network', 0)
+  }
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  return (await res.json()) as AppState
 }
 
 /** Ask the server to start the vendor's sign-in flow. Resolves once it has been launched. */

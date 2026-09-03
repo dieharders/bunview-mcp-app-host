@@ -8,7 +8,7 @@ import {
   type ModelChoice,
   type ProviderId,
 } from '../../shared/events'
-import { openChatStream } from '../lib/api'
+import { openChatStream, resetAppState } from '../lib/api'
 
 export interface ChatMessage {
   id: string
@@ -94,6 +94,18 @@ export function useClaudeStream() {
     setPhase('idle')
     setSessionId(null)
     sessionRef.current = null
+
+    // The app state is NOT part of the agent's session — it lives in the server process and
+    // outlives any conversation. Dropping the transcript without it leaves the panel and the
+    // header showing a status the new conversation never set, and `get_app_state` reading it
+    // back as though it had. Cleared here optimistically and on the server for real; a failed
+    // request leaves the panel blank rather than reinstating stale text.
+    setAppState({ status: null, notes: [] })
+    void resetAppState()
+      // Applied again from the response so the panel ends up matching the server even if the
+      // seed fetch in Chat was in flight across the reset.
+      .then(setAppState)
+      .catch(() => {})
   }, [stop])
 
   /**

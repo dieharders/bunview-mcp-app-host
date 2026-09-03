@@ -12,7 +12,7 @@ import { handleChat } from './chat'
 import { config } from './config'
 import { hookShutdown } from './proc'
 import { handleInstall, handleLogin } from './setup'
-import { getState } from './state'
+import { getState, resetState } from './state'
 
 // Must be installed before anything can spawn an agent. See proc.ts — without this, closing
 // the window mid-answer leaves the agent running against the user's plan.
@@ -45,7 +45,13 @@ const server = Bun.serve({
   routes: {
     '/api/chat': { POST: handleChat },
     '/api/auth': { GET: handleAuth },
-    '/api/state': { GET: () => Response.json(getState()) },
+    // DELETE is what "New chat" calls. The state lives in this process, not in the agent's
+    // session, so starting a fresh conversation would otherwise leave the panel — and
+    // `get_app_state` — showing what the PREVIOUS conversation wrote.
+    '/api/state': {
+      GET: () => Response.json(getState()),
+      DELETE: () => Response.json(resetState()),
+    },
 
     // The only two endpoints that change the user's machine or open an external flow. Both
     // are POST, and both are reached only from an explicit click that shows what will run.

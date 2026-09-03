@@ -135,6 +135,60 @@ describe('Chat — signed in', () => {
   })
 })
 
+describe('Chat — new conversation', () => {
+  /** One SSE body, framed the way the server writes it. */
+  function sse(events: unknown[]): Response {
+    const body = events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join('')
+    return new Response(new TextEncoder().encode(body), {
+      headers: { 'content-type': 'text/event-stream' },
+    })
+  }
+
+  test('New chat clears the app state the last conversation wrote', async () => {
+    chooseProvider('claude')
+
+    const calls: string[] = []
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.includes('/api/auth')) {
+        return Response.json({ state: 'ok', account: null, plan: 'max', subscription: true })
+      }
+      if (url.includes('/api/chat')) {
+        return sse([
+          { type: 'session', sessionId: 's1' },
+          { type: 'state', status: 'reading the codebase', notes: ['note one'] },
+          { type: 'done', sessionId: 's1', durationMs: 1 },
+        ])
+      }
+      if (url.includes('/api/state')) return Response.json({ status: null, notes: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    render(<Chat />)
+
+    const box = await screen.findByPlaceholderText(/Ask Claude Code anything/i)
+    fireEvent.change(box, { target: { value: 'hello' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Send/i })))
+
+    // The agent's tool calls landed: status in the header and the panel, one note beside it.
+    await waitFor(() =>
+      expect(screen.getAllByText('reading the codebase').length).toBeGreaterThan(0),
+    )
+    expect(screen.getByText('note one')).toBeDefined()
+
+    // This is the bug: the state is the server process's, not the session's, so dropping the
+    // transcript used to leave the previous conversation's status on screen.
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /New chat/i })))
+
+    expect(screen.queryByText('reading the codebase')).toBeNull()
+    expect(screen.queryByText('note one')).toBeNull()
+    expect(screen.getByText('— not set —')).toBeDefined()
+    // Cleared on the server too, or a reload — and `get_app_state` — brings it straight back.
+    expect(calls).toContain('DELETE /api/state')
+  })
+})
+
 describe('Chat — setup', () => {
   test('offers Install when the CLI is missing, and lists where it looked', async () => {
     chooseProvider('claude')

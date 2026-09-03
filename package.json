@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Minimal Bun + WebView scaffold for desktop apps that run on a Claude subscription",
+  "description": "Bun + WebView scaffold for desktop apps that run on an agent subscription plan.",
   "scripts": {
     "dev": "bun run build:css && bun run --parallel dev:css dev:app",
     "dev:headless": "bun run build:css && bun run --parallel dev:css dev:app:headless",

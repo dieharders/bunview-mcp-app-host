@@ -1,10 +1,39 @@
-# BunView
+# BunView - A native app using your Claude/ChatGPT subscription
 
-A minimal desktop scaffold for apps that run on **your Claude subscription** instead of a
-metered API key. Bun server, native OS webview, React frontend, one executable.
+A minimal desktop scaffold for a native app to connect a user's chatGPT/Claude subscription plan.
 
-It is a starting point to fork, not a product. Everything in it is either load-bearing or an
-obvious extension point.
+Features:
+
+- Native app executable
+- Bun server
+- React frontend in WebView
+- MCP App host integration
+- Example MCP tool use
+- Example prompt/response implementation
+- Pick AI model/effort parameters
+
+It is a starting point for your own purposes.
+
+## Quickstart
+
+```bash
+bun install
+bun run dev
+## Tests
+bun test
+bun run typecheck
+```
+
+## How it works
+
+User must choose which plan to connect — Claude Code or Codex.
+
+If the agent CLI is missing, the app offers to install it, downloading the vendor's own signed binary and verifying its checksum. If it is installed but signed out, it offers a Sign in button. Once the header badge shows your plan, the composer unlocks.
+
+The right-hand panel shows an app state the agent can write to via this app's own MCP tools.
+Try: **“Set the app status to hello and add a note.”** The panel updates as it answers.
+
+## Quick Guide Map
 
 ```
 ┌─ main.ts ────────────────┐        ┌─ src/server/worker.ts ──────────────┐
@@ -21,64 +50,23 @@ obvious extension point.
                                             ← in-process MCP tools call back
 ```
 
-## Quickstart
-
-```bash
-bun install
-bun run dev
-```
-
-A window opens and asks which plan to connect — Claude Code or Codex. **Nothing is contacted
-until you choose**, because probing a vendor means spawning their CLI to read your account.
-
-From there the app walks you the rest of the way: if the CLI is missing it offers to install
-it — downloading the vendor's own signed binary and verifying its checksum, no npm or Node
-required — and if it is installed but signed out it offers a Sign in button. Once the header badge shows your plan, the composer unlocks.
-
-The right-hand panel shows app state the agent can write to through this app's own MCP tools.
-Try: **“Set the app status to hello and add a note.”** The panel updates as it answers.
-
 ## Providers
 
-|                 | Claude Code                 | Codex                         |
-| --------------- | --------------------------- | ----------------------------- |
-| Runs on         | Claude Pro / Max            | ChatGPT Plus / Pro / Business |
-| Package         | `@anthropic-ai/claude-code` | `@openai/codex`               |
-| Streaming       | token by token              | **per message**               |
-| App's MCP tools | yes, in-process             | **no**                        |
+|                 | Claude Code      | Codex                         |
+| --------------- | ---------------- | ----------------------------- |
+| Runs on         | Claude Pro / Max | ChatGPT Plus / Pro / Business |
+| Streaming       | token by token   | **per message**               |
+| App's MCP tools | yes, in-process  | **no**                        |
 
-Both differences are stated on the picker rather than discovered later.
-
-To be precise about the second row: **Codex's own tools work fine** — shell, file edits, web
-search, and any MCP server you have configured are all mapped to tool chips. What is missing
-is _BunView's_ tools, and the reason is the registration channel rather than the tools. The
-Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to
-drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the
-handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no
-channel to answer on.
-
-It is still doable: Codex reads MCP servers from `~/.codex/config.toml`, and a `url` entry
-there uses streamable HTTP, so BunView could serve `POST /mcp` from the Bun server it already
-runs and keep the tools in-process after all. The costs are what stopped it — it writes to the
-user's **global** config rather than being scoped to a session, it currently needs
-`experimental_use_rmcp_client = true`, and it means implementing the MCP wire protocol rather
-than calling a helper.
+Codex still requires testing and validation.
 
 > The Codex provider is written against OpenAI's published CLI reference and has **not** been
 > exercised against a real `codex` install. Its event mapping is deliberately tolerant, so an
 > unverified field name degrades to "no event" rather than a crash — but treat it as untested.
 
-## Dev's Notes
+**Note** Codex's own tools work fine. What is missing is _BunView's_ tools, the reason is the registration channel. The Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no channel to answer on.
 
-Goal:
-I want to build a minimal scaffold project that will serve as a starting point for my future MCP apps. This project is a native app that can be installed on desktop (Windows, MacOS, Linux, maybe mobile too?). It's main responsibility is to provide a mechanism to interface with a user's subscription AI plan.
-
-Requirements:
-
-- Use Bun.js for the server component
-- WebView for the frontend UI. Make a very simple UI for now just to show the AI response for now.
-- Integrate with the subscription based AI (not api, start with Claude for now). I believe we need to spawn a `claude cli` process to accomplish this?
-- A simple example of streaming response from AI agent
+It is still doable: Codex reads MCP servers from `~/.codex/config.toml`, and a `url` entry there uses streamable HTTP, so BunView could serve `POST /mcp` from the Bun server it already runs and keep the tools in-process after all. The costs are what stopped it — it writes to the user's **global** config rather than being scoped to a session, it currently needs `experimental_use_rmcp_client = true`, and it means implementing the MCP wire protocol rather than calling a helper.
 
 ## Prerequisites
 
@@ -86,38 +74,27 @@ Requirements:
 | ----------- | -------------------------------------------------------------------------------------------------------------------------------- |
 | Bun         | ≥ 1.3.9 (`--watch=always` is used in dev)                                                                                        |
 | Claude Code | none — the app can install it. Or `curl -fsSL https://claude.ai/install.sh \| bash` / `irm https://claude.ai/install.ps1 \| iex` |
-| Windows     | WebView2 runtime — preinstalled on Windows 11 and current Windows 10                                                             |
+| Windows     | Nothing                                                                                                                          |
 | macOS       | Nothing; WKWebView is built in                                                                                                   |
 | Linux       | GTK 4 + WebKitGTK 6 — `apt install libgtk-4-1 libwebkitgtk-6.0-4` / `pacman -S gtk4 webkitgtk-6.0`                               |
 
-Desktop only. The whole design spawns a local process, which iOS and Android forbid; a mobile
-client would need this server hosted somewhere and a remote auth story instead.
+Desktop only. The whole design spawns a local process, which is not supported on Android, iOS. A mobile client could use Tauri instead of Bun to get around this.
 
-## How the subscription part works
+## How the agent connection works
 
-The app never sees a token. `claude auth login` writes OAuth credentials to
-`~/.claude/.credentials.json` (or the OS keychain), and the agent binary reads them when the
-app spawns it. Usage bills against your Pro/Max quota and obeys its rate limits.
+`claude auth login` writes OAuth credentials to `~/.claude/.credentials.json` (or the OS keychain), and the agent binary reads them when the app spawns it. Usage bills against your Pro/Max quota and obeys its rate limits.
 
-**The footgun this closes:** if `ANTHROPIC_API_KEY` is set in the environment, the CLI prefers
-it and bills API credits instead — silently, with no visible symptom until the invoice. So
-[`src/server/env.ts`](src/server/env.ts) strips it (and `ANTHROPIC_AUTH_TOKEN`,
-`ANTHROPIC_BASE_URL`, the Bedrock/Vertex switches) from the child environment. Set
-`BUNVIEW_ALLOW_API_KEY=1` to opt back in deliberately.
+### Prevent accidental API usage
 
-`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`,
-`codex login status`) and reports which credential is actually in
-play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key
-— usage is billed per token”_ when it is not.
+If `ANTHROPIC_API_KEY` is set in the environment, the CLI will prefer it and bills API credits instead. So [`src/server/env.ts`](src/server/env.ts) strips it (and `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, the Bedrock/Vertex switches) from the child environment. Set `BUNVIEW_ALLOW_API_KEY=1` to opt back in deliberately.
 
-## MCP: this app is the host
+`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`, `codex login status`) and reports which credential is actually in play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key — usage is billed per token”_ when it is not.
 
-MCP carries **tools**. It has no concept of a conversation, a model or a subscription, so it
-always needs a host that already has a model attached — and here that host is this app. The
-app registers its _own_ MCP server into the agent session, so the agent can call tools that
-change the app's live state.
+## MCP: App as the host
 
-[`src/server/mcp/app-tools.ts`](src/server/mcp/app-tools.ts) is the seam:
+MCP only carries **tools**. It has no concept of a conversation, a model or a subscription, so it always needs a host that already has a model attached. This app acts as the host. The app registers its _own_ MCP server into the agent session, so the agent can call tools that change the app's live state.
+
+[`src/server/mcp/app-tools.ts`](src/server/mcp/app-tools.ts):
 
 ```ts
 export const appToolsServer = createSdkMcpServer({
@@ -129,21 +106,15 @@ export const appToolsServer = createSdkMcpServer({
 })
 ```
 
-`createSdkMcpServer` runs these **in this process**. The handlers close over
-[`src/server/state.ts`](src/server/state.ts), so a tool call mutates the same object the UI is
-rendering — no IPC, no serialization boundary, no protocol to design, and nothing written to
-the user's global config. A stdio MCP server would instead put a process boundary between the
-agent's tools and your app's state; an HTTP one keeps them together but means implementing the
-wire protocol and registering it globally.
+`createSdkMcpServer` runs these **in this process**. The handlers close over [`src/server/state.ts`](src/server/state.ts), so a tool call mutates the same object the UI is rendering. A stdio MCP server would instead put a process boundary between the agent's tools and your app's state; an HTTP one keeps them together but means implementing the wire protocol and registering it globally.
 
-**To fork:** delete the three toy tools, register your real domain tools. Nothing else changes.
+## Forking:
 
-The other direction — publishing the same tool surface _outward_ so Claude Code can drive your
-app from a terminal — is a separate front door onto the same tools. Not built here.
+Delete the three example tools and register your own.
 
 ## Safety defaults
 
-Read-only, and arranged so widening scope is a deliberate act.
+Read-only.
 
 | Env var                                | Default                                           | Effect                                                             |
 | -------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------ |
@@ -163,20 +134,14 @@ Read-only, and arranged so widening scope is a deliberate act.
 
 Two things are worth knowing about the defaults:
 
-- **`settingSources: []` is not tidiness.** With the default, the session inherits every MCP
-  server in the user's `~/.claude.json`. On a working developer machine that can mean Gmail,
-  Drive and Calendar. A chat scaffold silently holding those is the surprise this closes.
-- **`--restricted` is passed as a hard backstop.** It removes the tools that run commands or
-  code, confines file tools to the working directories, ignores user/project/local settings,
-  and _refuses `bypassPermissions` outright_ — so an app built on this cannot footgun itself
-  by changing one variable.
+- **`settingSources: []` is not tidiness.** With the default, the session inherits every MCP server in the user's `~/.claude.json`. On a working developer machine that can mean Gmail, Drive and Calendar.
+- **`--restricted` is passed as a hard backstop.** It removes the tools that run commands or code, confines file tools to the working directories, ignores user/project/local settings, and _refuses `bypassPermissions` outright_ — so an app built on this cannot cause harm.
 
-**Never add `--bare`.** Its own help says auth becomes _“strictly `ANTHROPIC_API_KEY` or
-apiKeyHelper … OAuth and keychain are never read”_ — the exact negation of this project.
+**Never add `--bare`.** otherwise the sdk will use `ANTHROPIC_API_KEY` and bill based on API usage instead.
 
-### Widening scope
+### Widening permissions scope
 
-An app that needs to read a project directory:
+If your app needs to read a project directory:
 
 ```bash
 BUNVIEW_ALLOWED_TOOLS="Read,Grep,Glob,mcp__bunview__*" \
@@ -188,59 +153,24 @@ bun run dev
 
 ## Architecture notes
 
-**The webview owns the main thread.** `webview.run()` runs a blocking native event loop, so a
-`Bun.serve` on the same thread would register with an event loop that never runs again and
-every request would hang. The server therefore lives in a Worker, and the two meet once, at
-the `{ type: 'ready', port }` handshake.
+The webview owns the main thread. `webview.run()` runs a blocking native event loop, so a `Bun.serve` on the same thread would register with an event loop that never runs again and every request would hang. The server therefore lives in a Worker, and the two meet once, at the `{ type: 'ready', port }` handshake.
 
-**`main.ts` must stay at the repo root, and the Worker specifier must stay a string literal.**
-Bun discovers worker modules by static analysis of `new Worker('./src/server/worker.ts')` —
-wrapping it in `new URL(…, import.meta.url)` silently omits the module from the compiled
-binary. And a plain specifier resolves against the bunfs root, which is the common ancestor of
-`build.ts`'s `entrypoints`; keeping `main.ts` at the root makes that the repo root so the path
-means the same thing in dev and in the executable.
+`main.ts` must stay at the repo root, and the Worker specifier must stay a string literal. Bun discovers worker modules by static analysis of `new Worker('./src/server/worker.ts')` — wrapping it in `new URL(…, import.meta.url)` silently omits the module from the compiled binary. And a plain specifier resolves against the bunfs root, which is the common ancestor of `build.ts`'s `entrypoints`; keeping `main.ts` at the root makes that the repo root so the path means the same thing in dev and in the executable.
 
-**Events are a closed union.** [`src/shared/events.ts`](src/shared/events.ts) defines every
-shape the browser can see, and [`claude-map.ts`](src/server/providers/claude-map.ts) maps the
-agent's messages onto it, dropping anything unrecognised. That keeps an unversioned internal
-wire format out of the UI, keeps the provider seam real, and — importantly — keeps tool
-_inputs_ off the wire, since an `Edit` tool's input is file contents. Tool events carry a name
-and nothing else.
+**Events are a closed union.** [`src/shared/events.ts`](src/shared/events.ts) defines every shape the browser can see, and [`claude-map.ts`](src/server/providers/claude-map.ts) maps the agent's messages onto it, dropping anything unrecognised. That keeps an unversioned internal wire format out of the UI, keeps the provider seam real, and — importantly — keeps tool _inputs_ off the wire, since an `Edit` tool's input is file contents. Tool events carry a name and nothing else.
 
-**Cancellation has three independent paths**: the client's `AbortController`, the server
-listening to both `req.signal` and the stream's `cancel()`, and a process-exit sweep in
-[`proc.ts`](src/server/proc.ts). The last one matters because neither `worker.terminate()` nor
-`process.exit()` reaps a grandchild — without it, closing the window mid-answer leaves an agent
-running against your plan.
+**Cancellation has three independent paths**: the client's `AbortController`, the server listening to both `req.signal` and the stream's `cancel()`, and a process-exit sweep in [`proc.ts`](src/server/proc.ts). The last one matters because neither `worker.terminate()` nor `process.exit()` reaps a grandchild — without it, closing the window mid-answer leaves an agent running against your plan.
 
-**SSE, not `EventSource`.** EventSource cannot POST, cannot set headers, and auto-reconnects
-when the server closes the stream — which for a one-shot completion re-fires the whole prompt
-the moment the answer finishes.
+**SSE, not `EventSource`.** EventSource cannot POST, cannot set headers, and auto-reconnects when the server closes the stream — which for a one-shot completion re-fires the whole prompt the moment the answer finishes.
 
-## Onboarding: install and sign in
+## Onboarding: Installing agent cli and auth flow
 
-Two endpoints reach outside the app's own process, and both are gated behind an explicit click
-that shows what will run first:
+Two endpoints reach outside the app's own process, and both are gated behind an explicit click that shows what will run first:
 
 - **`POST /api/install`** downloads the vendor's own signed binary into BunView's data folder
   and verifies its SHA-256, streaming progress back as SSE. Afterwards it clears the discovery
   cache and re-detects, so the new binary is found without a restart.
   `BUNVIEW_ALLOW_INSTALL=0` removes the button entirely.
-
-  **Why not `npm install -g`**, which this replaced — three independent reasons:
-
-  1. **Anthropic deprecated it.** Their README says so outright: _"Installation via npm is
-     deprecated. Use one of the recommended methods below."_ It is also the only listed method
-     that needs Node at all.
-  2. **It cannot work from a GUI app on Windows.** A process's environment block is fixed at
-     launch and [cannot be changed from outside](https://learn.microsoft.com/en-us/windows/win32/procthread/environment-variables),
-     so after `npm -g` adds a directory to PATH, this app and every child it spawns still see
-     the old PATH. "Installed successfully, but I can't find it — please restart" is the
-     _expected_ outcome there, not an edge case.
-  3. **It has the whole documented failure surface**: EACCES on global prefixes, the
-     wrong-prefix bug when several Node versions exist, corporate registries that mirror the
-     wrapper package but not the eight platform packages, and `.cmd` shims that Node refuses
-     to spawn since CVE-2024-27980.
 
   What [`install/`](src/server/install/) does instead is what the vendors' own `install.sh` /
   `install.ps1` do — read the release manifest, download the platform binary, verify the
@@ -252,52 +182,19 @@ that shows what will run first:
   It installs to the app's data folder and **not** onto PATH — `%LOCALAPPDATA%\BunView`,
   `~/Library/Application Support/BunView`, or `$XDG_DATA_HOME/BunView`. Discovery checks it
   **last**, so a `claude` the user installed themselves stays authoritative; these tools share
-  state under `~/.claude` / `~/.codex`, and quietly preferring our copy over one they already
-  configured is how a working setup starts behaving oddly. Uninstalling is deleting the folder.
+  state under `~/.claude` / `~/.codex`. Uninstalling is deleting the folder.
 
-  Nothing auto-installs. Cursor shipped a silent auto-install of its agent in 1.6.26 and
-  reverted it in 1.7 after user pushback.
+  Nothing auto-installs.
 
 - **`POST /api/login`** opens the vendor's sign-in command **in a real terminal window** rather
   than driving it headless through pipes. Both vendors' login flows are interactive — they open
-  a browser, run a localhost callback listener, and may print a code to confirm — and
-  reimplementing that means owning a flow we do not control and cannot test against every
-  version. Getting it subtly wrong strands the user with no way to sign in at all, so this
-  delegates to the vendor's own proven path and then says "finish signing in, then press Retry".
-
-## A note on dependencies
-
-`@anthropic-ai/claude-agent-sdk` declares three peers — `zod`, `@modelcontextprotocol/sdk`
-and `@anthropic-ai/sdk` — but only **`zod`** is in this project's `dependencies`, and that is
-deliberate.
-
-`zod` is genuinely ours: [`mcp/app-tools.ts`](src/server/mcp/app-tools.ts) imports `z` to
-declare the MCP tool schemas. It must be **v4** — the SDK's peer range is `^4.0.0`.
-
-The other two are not imported anywhere, by us or by the SDK. `sdk.mjs` is a 1.4 MB
-self-contained bundle with zero imports of either; the MCP and Anthropic protocol strings you
-can find in the compiled binary come from inside that bundle, not from those packages. Bun
-auto-installs peers, so they land in `node_modules` regardless and `tsc` resolves the types
-the SDK's `.d.ts` re-exports. Verified: removing `@modelcontextprotocol/sdk` from
-`dependencies` leaves the compiled binary **byte-for-byte the same size**, and a clean
-`bun install --frozen-lockfile` still resolves both peers.
-
-The one case where this would matter is regenerating the lockfile with npm, pnpm or yarn,
-which do not auto-install peers the same way. If you need that, add both peers explicitly
-then — not before.
+  a browser, run a localhost callback listener, and may print a code to confirm.
 
 ## Adding a provider
 
-Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`, `stream()` —
-in a file beside `claude.ts` and `codex.ts`, add it to `PROVIDERS` in
-[`shared/events.ts`](src/shared/events.ts) and to the registry in
-[`providers/index.ts`](src/server/providers/index.ts). Because `stream()` yields only
-`AppEvent`, the frontend needs no changes — it cannot tell the vendors apart.
+Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`, `stream()` — in a file beside `claude.ts` and `codex.ts`, add it to `PROVIDERS` in [`shared/events.ts`](src/shared/events.ts) and to the registry in [`providers/index.ts`](src/server/providers/index.ts). Because `stream()` yields only `AppEvent`, the frontend needs no changes — it cannot tell the vendors apart.
 
-Discovery is shared: [`discovery.ts`](src/server/providers/discovery.ts) takes a `CliSpec`
-(binary name, npm package, path to the real entry point) and returns a spawnable **argv**
-rather than a bare path. That last part matters — Claude Code's bin is a native `claude.exe`,
-while Codex's is `bin/codex.js`, a Node launcher that has to be run as `node codex.js`.
+Discovery is shared: [`discovery.ts`](src/server/providers/discovery.ts) takes a `CliSpec` (binary name, npm package, path to the real entry point) and returns a spawnable **argv** rather than a bare path.
 
 ## Build
 
@@ -307,11 +204,7 @@ bun run build:all    # five targets   -> dist/
 ```
 
 - The Windows binary stays on the **CONSOLE** subsystem and hides its own console window at
-  runtime (`hideOwnConsoleWindow()` in [main.ts](main.ts)). Bun's `hideConsole` — and the
-  `editbin /SUBSYSTEM:WINDOWS` byte-patch this repo used to apply by hand — strips the
-  process's standard handles, and `new Worker(...)` then dies about a millisecond into a
-  double-clicked launch with no window and no crash log ([oven-sh/bun#19916]). `build.ts` pins
-  `hideConsole: false` so a changed default cannot bring that back.
+  runtime (`hideOwnConsoleWindow()` in [main.ts](main.ts)).
 - The Windows binary also carries an icon, version, publisher, description and copyright in its
   VERSIONINFO resource. The _running window_ gets its icon separately, from `setWindowIcon()` in
   [main.ts](main.ts) — Windows treats the file icon and the window icon as unrelated.
@@ -323,13 +216,13 @@ bun run build:all    # five targets   -> dist/
 - All three icons come from the one committed `assets/icon.ico`:
   [build-icons.ts](build-icons.ts) decodes its DIB entries and re-encodes them as PNG and ICNS,
   so there is a single artefact to keep in step with `assets/icon.svg`.
-- Tailwind runs **before** the bundler: `generated.css` is an _input_ (the HTML links it), so
-  `build.ts` fails loudly if it is missing rather than shipping an unstyled binary. The icon and
-  `package.json`'s `version`/`description` are gated the same way, for the same reason — a
-  missing one is invisible until someone downloads the release.
+- Tailwind runs **before** the bundler: `generated.css` is an _input_ (the HTML links it).
 
-The compiled binary spawns the _system_ `claude`, resolved at runtime. To ship an app that
-needs no separate CLI install, bundle the platform binary instead:
+The compiled binary spawns the _system_ `claude`, resolved at runtime.
+
+### How to bundle agent deps instead
+
+To ship an app that needs no separate CLI install, bundle the platform binary instead:
 
 ```ts
 import binPath from '@anthropic-ai/claude-agent-sdk-darwin-arm64/claude' with { type: 'file' }
@@ -337,14 +230,11 @@ import { extractFromBunfs } from '@anthropic-ai/claude-agent-sdk/extract'
 // pathToClaudeCodeExecutable: extractFromBunfs(binPath)
 ```
 
-`require.resolve` cannot see into the compiled `$bunfs`, which is what `extractFromBunfs` (SDK
-≥ 0.3.144) exists for. Not used here because cross-compiling five targets would require all
-eight per-platform packages present.
+`require.resolve` cannot see into the compiled `$bunfs`, which is what `extractFromBunfs` (SDK ≥ 0.3.144) exists for. Not used here because cross-compiling five targets would require all eight per-platform packages present.
 
 ## Frontend fallback
 
-The frontend is bundled by Bun's HTML entrypoint, imported inside the Worker. If a future Bun
-release breaks that under `--compile`, pre-bundle in `build.ts`:
+The frontend is bundled by Bun's HTML entrypoint, imported inside the Worker. If a future Bun release breaks that under `--compile`, pre-bundle in `build.ts` and serve the output through `with { type: 'file' }` imports (that is what `declarations.d.ts` is for). This loses HMR, so it is a deliberate edit rather than a runtime switch.:
 
 ```ts
 await Bun.build({
@@ -355,27 +245,3 @@ await Bun.build({
   minify: true,
 })
 ```
-
-and serve the output through `with { type: 'file' }` imports (that is what `declarations.d.ts`
-is for). This loses HMR, so it is a deliberate edit rather than a runtime switch.
-
-## Tests
-
-```bash
-bun test        # event mapping, binary discovery, UI states
-bun run typecheck
-```
-
-`bun test` rather than Vitest, to keep one toolchain. The file-level conventions are unchanged,
-so switching is mechanical.
-
-## Deliberately left out
-
-Markdown rendering of replies (plain text today — `react-markdown` plus sanitisation is the
-first upgrade) · our own conversation persistence (the CLI keeps a transcript, so `resume`
-works) · tool-result rendering · thinking prose · an outward MCP server · routing, a state
-library, a data-fetching library · multi-window, tray, auto-update, installers · light theme ·
-cost display, because `total_cost_usd` is an API-equivalent figure and showing “$0.04” on a
-subscription would misrepresent it.
-
-[oven-sh/bun#19916]: https://github.com/oven-sh/bun/issues/19916

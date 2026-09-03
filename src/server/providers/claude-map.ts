@@ -10,7 +10,7 @@
  * nobody has looked at.
  */
 import type { AppEvent } from '../../shared/events'
-import { ERROR_COPY } from '../../shared/events'
+import { errorCopy } from '../../shared/events'
 
 /**
  * Only the fields we read.
@@ -77,7 +77,7 @@ export function mapMessage(raw: unknown, state: MapState): AppEvent[] {
   if (msg.type === 'result') {
     if (typeof msg.session_id === 'string') state.sessionId = msg.session_id
     if (msg.is_error) {
-      return [{ type: 'error', code: 'cli_failed', message: ERROR_COPY.cli_failed }]
+      return [{ type: 'error', code: 'cli_failed', message: errorCopy('cli_failed', 'claude') }]
     }
     return [
       {

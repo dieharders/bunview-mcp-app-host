@@ -12,10 +12,19 @@
  */
 import type { AuthResponse } from '../shared/events'
 import { getProvider } from './providers'
+import { resetDiscovery } from './providers/discovery'
 import { canInstall } from './setup'
 
 export async function handleAuth(req: Request): Promise<Response> {
   const provider = getProvider(new URL(req.url).searchParams.get('provider'))
+
+  // Discovery memoises for the life of the process, so "not cached" above was only half true:
+  // the auth answer was fresh but the location it was based on was not. A user who installed
+  // the CLI themselves — in the very terminal a sign-in just opened — pressed Retry and got
+  // "isn't installed" until the app restarted. Retry is the one moment the filesystem is known
+  // to have changed, so it is the right place to spend the probe again.
+  resetDiscovery()
+
   const [auth, detection] = await Promise.all([provider.authStatus(), provider.detect()])
 
   if (auth.state === 'cli_missing') {

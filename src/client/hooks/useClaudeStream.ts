@@ -2,13 +2,13 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
-  ERROR_COPY,
+  errorCopy,
   type AppState,
   type EffortChoice,
   type ModelChoice,
   type ProviderId,
 } from '../../shared/events'
-import { ApiError, openChatStream } from '../lib/api'
+import { openChatStream } from '../lib/api'
 
 export interface ChatMessage {
   id: string
@@ -174,7 +174,9 @@ export function useClaudeStream() {
           }
         } catch (err) {
           if (!(err instanceof DOMException && err.name === 'AbortError')) {
-            setError(err instanceof ApiError ? ERROR_COPY.cli_failed : ERROR_COPY.cli_failed)
+            // Was a ternary whose two branches were the same string. A transport failure and
+            // a stream failure read identically to the user, so say so once.
+            setError(errorCopy('cli_failed', provider))
             setPhase('error')
           }
         } finally {

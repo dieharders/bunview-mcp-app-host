@@ -1,5 +1,5 @@
 /**
- * Sign-in hands the terminal the DISCOVERED path, not the bare command name.
+ * Sign-in hands the terminal the DISCOVERED argv, not the bare command name.
  *
  * The regression this pins: a managed install lands in the app's data directory, deliberately
  * off PATH, so a terminal given `codex login` opens on "'codex' is not recognized" for a CLI
@@ -8,43 +8,46 @@
  * Run against EVERY provider, not just the one that was reported. The bug only surfaced for
  * Codex because Claude happened to be installed by its own installer — which does put it on
  * PATH — and was already signed in, so the broken branch was never reached. Nothing about the
- * defect was Codex-specific: `managedBinaryPath('claude')` is off PATH in exactly the same way,
- * and a provider-specific test would have gone on believing Claude was fine.
+ * defect was Codex-specific: `managedBinaryPath('claude')` is off PATH in exactly the same way.
  *
- * Assertions read the FLATTENED command text rather than argv elements, because the three
- * platform branches package the same command differently: Windows passes it as separate
- * arguments to cmd, macOS embeds it in an AppleScript string literal, Linux in a `bash -lc`
- * payload. Matching elements would silently pass on the two platforms it never really checked.
+ * These are HANDLER tests: which status comes back, what reaches the OS, what the failure copy
+ * says. The shape of the command itself is terminal.test.ts's job, because that is a pure
+ * string and does not need a stubbed spawn to check.
  *
- * Linux is skipped because `spawnInTerminal` there depends on which terminal emulator happens
- * to be installed, which is not what this is testing.
+ * Stubs go through `spyOn`, which `mock.restore()` undoes even when a test throws. An earlier
+ * version assigned over `Bun.spawn` and the provider registry by hand and restored them in an
+ * `afterEach` — process-global state that leaks into every later file in the run if anything
+ * fails on the way to the restore.
  */
-import { afterEach, describe, expect, test } from 'bun:test'
-import { PROVIDER_IDS, PROVIDERS, type ProviderId } from '../shared/events'
+import { afterEach, describe, expect, mock, spyOn, test } from 'bun:test'
+import { PROVIDER_IDS, loginCommand, type ProviderId } from '../shared/events'
 import { PROVIDER_IMPLS } from './providers'
 import { handleLogin } from './setup'
+import { shQuote, winCommandLine } from './terminal'
 import type { ProviderDetection } from './providers/types'
 
-const IS_LINUX = process.platform === 'linux'
-
-const realSpawn = Bun.spawn
-const realDetect = new Map(PROVIDER_IDS.map((id) => [id, PROVIDER_IMPLS[id].detect]))
+const IS_WIN = process.platform === 'win32'
 
 afterEach(() => {
-  Object.assign(Bun, { spawn: realSpawn })
-  for (const id of PROVIDER_IDS) PROVIDER_IMPLS[id].detect = realDetect.get(id)!
+  mock.restore()
 })
 
-/** Run handleLogin with a stubbed discovery, capturing argv instead of opening a window. */
-async function login(provider: ProviderId, detection: ProviderDetection) {
+/** Run handleLogin with discovery and the OS both stubbed, capturing what would be spawned. */
+async function login(provider: ProviderId, detection: ProviderDetection, exitCode = 0) {
   const calls: string[][] = []
-  Object.assign(Bun, {
-    spawn: (argv: string[]) => {
-      calls.push(argv)
-      return { pid: 0, kill() {}, exited: Promise.resolve(0) }
-    },
-  })
-  PROVIDER_IMPLS[provider].detect = () => Promise.resolve(detection)
+
+  spyOn(Bun, 'spawn').mockImplementation(((argv: string[]) => {
+    calls.push(argv)
+    return { pid: 0, kill() {}, unref() {}, exited: Promise.resolve(exitCode) }
+  }) as unknown as typeof Bun.spawn)
+
+  // Linux picks whichever emulator is on PATH. Pin it so this suite means the same thing on
+  // every machine instead of depending on what the runner happens to have installed.
+  spyOn(Bun, 'which').mockImplementation(
+    ((name: string) => `/usr/bin/${name}`) as unknown as typeof Bun.which,
+  )
+
+  spyOn(PROVIDER_IMPLS[provider], 'detect').mockImplementation(() => Promise.resolve(detection))
 
   const res = await handleLogin(
     new Request('http://localhost/api/login', {
@@ -52,96 +55,121 @@ async function login(provider: ProviderId, detection: ProviderDetection) {
       body: JSON.stringify({ provider }),
     }),
   )
+
   return {
+    res,
     body: (await res.json()) as { ok: boolean; message: string },
     calls,
-    /** Everything handed to the OS, as one string. See the header on why. */
+    /** Everything handed to the OS, flattened. Only for "did this path reach the OS at all". */
     text: calls.flat().join(' '),
   }
 }
 
-const found = (argv: string[], path: string | null): ProviderDetection => ({
+const found = (argv: string[]): ProviderDetection => ({
   argv,
-  path,
   searched: [],
   unresolvedShim: null,
 })
 
 for (const provider of PROVIDER_IDS) {
-  const info = PROVIDERS[provider]
-  /** Managed-install shape, with a space in it — what naive command joining gets wrong. */
-  const managed = `/Application Support/BunView/bin/${provider}/${provider}.exe`
+  /** A real managed path for this platform, spaces and all. */
+  const managed = IS_WIN
+    ? `C:\\Users\\Jane Doe\\AppData\\Local\\BunView\\bin\\${provider}\\bin\\${provider}.exe`
+    : `/Users/jane/Library/Application Support/BunView/bin/${provider}/bin/${provider}`
 
   describe(provider, () => {
-    test.skipIf(IS_LINUX)('spawns the discovered binary, not the bare name', async () => {
-      const { body, text } = await login(provider, found([managed], managed))
+    test('spawns the discovered binary, not the bare name', async () => {
+      const { res, body, calls, text } = await login(provider, found([managed]))
 
+      expect(res.status).toBe(200)
       expect(body.ok).toBe(true)
       expect(text).toContain(managed)
-      // The whole defect in one assertion: the bare command never reaches the terminal. It
-      // survives the path containing the binary's name — `…/codex/codex.exe login` is not
-      // `codex login` — which is what makes this catch the real bug rather than a near miss.
-      expect(text).not.toContain(info.loginCommand)
+
+      // The whole defect in one assertion. Checked against the argv ELEMENTS rather than the
+      // flattened text: the real POSIX managed path ends `/bin/codex/bin/codex`, so joining it
+      // to the next element spells the literal string `codex login` and a substring check
+      // would fail against a perfectly correct implementation.
+      expect(calls.flat()).not.toContain(loginCommand(provider))
+      expect(calls.flat()).not.toContain(provider)
     })
 
-    test.skipIf(IS_LINUX)('passes the provider’s own login subcommand, in order', async () => {
-      const { text } = await login(provider, found([managed], managed))
+    test('packages the command the way this platform’s shell will parse it', async () => {
+      const { calls } = await login(provider, found([managed]))
+      const loginArgv = [managed, ...(provider === 'claude' ? ['auth', 'login'] : ['login'])]
 
-      let at = text.indexOf(managed)
-      expect(at).toBeGreaterThanOrEqual(0)
-      for (const arg of info.loginArgs) {
-        const next = text.indexOf(arg, at)
-        expect(next).toBeGreaterThan(at)
-        at = next
+      if (IS_WIN) {
+        // One argument holding the whole command line, wrapped for `cmd /s`. Passing the parts
+        // separately is what let cmd's quote rules mangle them.
+        expect(calls.flat()).toContain(winCommandLine(loginArgv))
+      } else {
+        // Embedded in an AppleScript literal or a `bash -lc` payload — either way the path is
+        // single-quoted, so a space cannot split it.
+        expect(calls.flat().join(' ')).toContain(shQuote(managed))
       }
     })
 
-    test.skipIf(IS_LINUX)('keeps a path with spaces intact', async () => {
-      const { text } = await login(provider, found([managed], managed))
+    test('keeps the interpreter for a Node-launcher entry point', async () => {
+      const js = IS_WIN ? 'C:\\npm\\node_modules\\bin\\cli.js' : '/opt/npm/node_modules/bin/cli.js'
+      const node = IS_WIN ? 'C:\\Program Files\\nodejs\\node.exe' : '/usr/bin/node'
 
-      // Neither split on the space nor pre-quoted by us: on Windows Bun quotes each argument on
-      // its way to the OS, and a manually quoted string is exactly what cmd.exe mangles.
-      expect(text).toContain(managed)
-      expect(text).not.toContain(`"${managed}"`)
-    })
+      const { text } = await login(provider, found([node, js]))
 
-    test.skipIf(IS_LINUX)('keeps the interpreter for a Node-launcher entry point', async () => {
-      const js = `/opt/npm/node_modules/${info.npmPackage}/bin/${provider}.js`
-      const { text } = await login(provider, found(['/usr/bin/node', js], js))
-
-      const nodeAt = text.indexOf('/usr/bin/node')
+      const nodeAt = text.indexOf(node)
       expect(nodeAt).toBeGreaterThanOrEqual(0)
       // node must come BEFORE the script, or the .js is being executed directly.
       expect(text.indexOf(js)).toBeGreaterThan(nodeAt)
     })
 
-    test.skipIf(IS_LINUX)('signs in through an unresolved shim rather than giving up', async () => {
-      const shim = `C:\\npm\\${provider}.cmd`
+    test('signs in through an unresolved shim rather than giving up', async () => {
+      const shim = 'C:\\npm\\cli.cmd'
       const { body, text } = await login(provider, {
         argv: [],
-        path: null,
         searched: [],
         unresolvedShim: shim,
       })
 
       expect(body.ok).toBe(true)
-      expect(text).toContain(shim)
+      // Compared after this platform's own escaping rather than raw: the macOS branch doubles
+      // every backslash on its way into an AppleScript string literal, so a raw comparison
+      // passes on Windows and fails on macOS for a correct implementation.
+      expect(text).toContain(IS_WIN ? shim : shim.replaceAll('\\', '\\\\'))
     })
 
     test('reports not installed rather than spawning when nothing was found', async () => {
-      const { body, calls } = await login(provider, found([], null))
+      const { res, body, calls } = await login(provider, found([]))
 
+      expect(res.status).toBe(412)
       expect(body.ok).toBe(false)
       expect(calls).toHaveLength(0)
     })
 
-    test.skipIf(IS_LINUX)('advises the resolved command, not the bare one', async () => {
-      const { body } = await login(provider, found([managed], managed))
-      if (body.ok) return // A terminal opened; there is nothing to advise.
+    test('advises the resolved command, not the bare one, when no window opens', async () => {
+      // Exit code 1: the launcher ran but no terminal appeared — a denied Automation prompt on
+      // macOS, a missing emulator on Linux. Forcing it is the only way this assertion runs at
+      // all; guarding with `if (body.ok) return` made the test unconditionally vacuous.
+      const { body } = await login(provider, found([managed]), 1)
 
-      // The "run it yourself" copy must not repeat the advice that just failed.
+      expect(body.ok).toBe(false)
       expect(body.message).toContain(managed)
-      expect(body.message).not.toContain(`\`${info.loginCommand}\``)
+      expect(body.message).not.toContain(`\`${loginCommand(provider)}\``)
     })
   })
 }
+
+test('rejects an unknown provider without spawning', async () => {
+  const calls: string[][] = []
+  spyOn(Bun, 'spawn').mockImplementation(((argv: string[]) => {
+    calls.push(argv)
+    return { pid: 0, kill() {}, unref() {}, exited: Promise.resolve(0) }
+  }) as unknown as typeof Bun.spawn)
+
+  const res = await handleLogin(
+    new Request('http://localhost/api/login', {
+      method: 'POST',
+      body: JSON.stringify({ provider: 'gemini' }),
+    }),
+  )
+
+  expect(res.status).toBe(400)
+  expect(calls).toHaveLength(0)
+})

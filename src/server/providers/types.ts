@@ -16,13 +16,14 @@ export interface ProviderDetection {
   /**
    * The resolved argv prefix, ready to spawn. Empty when not installed.
    *
-   * Separate from `path` because the two are not interchangeable: a Node-launcher entry point
-   * resolves to `[node, codex.js]`, and anything that reconstructs a command from `path` alone
-   * would run a `.js` file as if it were an executable. Sign-in reads THIS, not `path`.
+   * The ONLY representation of "what do I run" in this contract. A single path cannot express
+   * it: a Node-launcher entry point resolves to `[node, codex.js]`, and anything that
+   * reconstructs a command from that path alone runs a `.js` file as if it were an executable.
+   * `Discovery` still carries a `path` for the one API that demands a single string (the Agent
+   * SDK's `pathToClaudeCodeExecutable`); nothing else should reach for it, and it is kept out
+   * of this interface so nothing accidentally can.
    */
   argv: string[]
-  /** Absolute path to the executable we would spawn, or null when not installed. */
-  path: string | null
   /** Every location tried, in order. A provider returning [] makes its own failure
    *  undiagnosable, so this is part of the contract rather than a debug extra. */
   searched: string[]

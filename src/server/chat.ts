@@ -9,9 +9,10 @@
 import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
+  DEFAULT_PROVIDER,
   EFFORTS,
-  ERROR_COPY,
   MODELS,
+  errorCopy,
   type AppEvent,
   type EffortChoice,
   type ModelChoice,
@@ -26,9 +27,15 @@ import { HEARTBEAT_MS, PING, SSE_HEADERS, frame } from './sse'
  */
 const MAX_PROMPT_CHARS = 24_000
 
+// DEFAULT_PROVIDER because this fires before the body has been parsed far enough to name one
+// — and `bad_request` is the one copy that mentions no product, so nothing depends on it.
 const badRequest = () =>
   Response.json(
-    { type: 'error', code: 'bad_request', message: ERROR_COPY.bad_request } satisfies AppEvent,
+    {
+      type: 'error',
+      code: 'bad_request',
+      message: errorCopy('bad_request', DEFAULT_PROVIDER),
+    } satisfies AppEvent,
     { status: 400 },
   )
 
@@ -83,7 +90,11 @@ export async function handleChat(req: Request): Promise<Response> {
         console.error('[chat] stream failed:', err)
         try {
           controller.enqueue(
-            frame({ type: 'error', code: 'cli_failed', message: ERROR_COPY.cli_failed }),
+            frame({
+              type: 'error',
+              code: 'cli_failed',
+              message: errorCopy('cli_failed', provider.id),
+            }),
           )
         } catch {
           // Client is already gone — nothing to report to.

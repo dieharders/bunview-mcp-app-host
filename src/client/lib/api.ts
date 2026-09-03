@@ -41,7 +41,15 @@ export async function startLogin(provider: ProviderId): Promise<SetupEvent> {
   } catch {
     throw new ApiError('network', 0)
   }
-  return (await res.json()) as SetupEvent
+  // Deliberately NOT `if (!res.ok) throw`: the 412 carries a message written for this exact
+  // user ("The CLI is not installed yet"), and discarding it would replace real copy with a
+  // generic failure. A body that is not JSON — a proxy page, an unhandled 500 — has nothing
+  // worth showing, so that is the case that throws.
+  try {
+    return (await res.json()) as SetupEvent
+  } catch {
+    throw new ApiError(`HTTP ${res.status}`, res.status)
+  }
 }
 
 /**

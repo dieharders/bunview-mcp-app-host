@@ -48,6 +48,8 @@ jobs:
       - run: bun install --frozen-lockfile
 
       - run: bun run typecheck
+      - run: bun run lint
+      - run: bun run format:check
       - run: bun test
 
       # Tailwind's output is an INPUT to the bundle (index.html links it), so it has to exist

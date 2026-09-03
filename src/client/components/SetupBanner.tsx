@@ -68,7 +68,11 @@ export function SetupBanner({
         const result = await startLogin(provider)
         setNote(result.type === 'done' ? result.message : null)
       } catch {
-        setNote(`Couldn’t start sign-in. Run \`${PROVIDERS[provider].loginCommand}\` yourself.`)
+        // No command named here on purpose. The client does not know the discovered argv, and
+        // the bare `codex login` it used to print is exactly the advice that fails for a
+        // managed install. When the server can answer at all it sends the resolved command
+        // itself; this branch only runs when it could not be reached.
+        setNote('Couldn’t reach BunView to start sign-in. Try again.')
       } finally {
         setBusy(null)
       }
@@ -79,6 +83,9 @@ export function SetupBanner({
 
   const info = PROVIDERS[provider]
   const missing = auth.state === 'cli_missing'
+  // The one "missing" state a sign-in can still act on: the shim is on PATH, so a terminal —
+  // which has a real shell and a real PATH — can run it even though this process cannot.
+  const shimOnly = auth.state === 'cli_missing' && Boolean(auth.unresolvedShim)
 
   return (
     <div
@@ -152,8 +159,11 @@ export function SetupBanner({
           </Button>
         )}
 
-        {/* Signing in needs the binary, so it only appears once there is one to run. */}
-        {!missing && (
+        {/* Signing in needs something runnable — either a resolved binary, or a shim a real
+            terminal can resolve for itself. Without the second case the server's shim fallback
+            was unreachable: the only button that starts a sign-in was hidden in the one state
+            that fallback exists for. */}
+        {(!missing || shimOnly) && (
           <Button size="sm" onClick={login} loading={busy === 'login'} disabled={busy !== null}>
             <LogIn className="size-3.5" aria-hidden />
             Sign in

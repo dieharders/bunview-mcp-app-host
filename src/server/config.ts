@@ -5,6 +5,7 @@
  * defaults are chosen to be the *safe* end of each axis, and widening any of them is a
  * single deliberate edit rather than a change spread across five call sites.
  */
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 const str = (key: string): string | undefined => {
@@ -15,6 +16,16 @@ const str = (key: string): string | undefined => {
 const num = (key: string, fallback: number): number => {
   const v = Number(process.env[key])
   return Number.isFinite(v) && v > 0 ? v : fallback
+}
+
+/** A directory that is actually there, or undefined — noisily, since the user asked for it. */
+const existingDir = (dir: string | undefined): string | undefined => {
+  if (!dir) return undefined
+  if (existsSync(dir)) return dir
+  console.warn(
+    `✗ BUNVIEW_CWD is not a directory that exists: ${dir}\n  Falling back to the home directory.`,
+  )
+  return undefined
 }
 
 const bool = (key: string, fallback: boolean): boolean => {
@@ -77,8 +88,13 @@ export const config = {
    * the Desktop as cwd, and from some shell contexts it gets System32. cwd decides which
    * project bucket the session's transcript lands in AND which directory `--restricted`
    * confines the file tools to, so it needs to be somewhere stable and user-owned.
+   *
+   * Checked for existence rather than trusted: this value is handed to `Bun.spawn`, which
+   * throws on a working directory that is not there. A stale BUNVIEW_CWD (a typo, an unmounted
+   * drive) would otherwise take out the sign-in flow — the one path a user reaches for when
+   * something is already wrong.
    */
-  cwd: str('BUNVIEW_CWD') ?? homedir(),
+  cwd: existingDir(str('BUNVIEW_CWD')) ?? homedir(),
 
   /** Default model when the request does not name one. Undefined = the CLI's own default. */
   model: str('BUNVIEW_MODEL'),

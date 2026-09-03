@@ -54,6 +54,15 @@ export interface StreamOptions {
   sessionId: string | null
   model: ModelChoice
   effort: EffortChoice
+  /**
+   * The provider's own declared extras, already coerced against `PROVIDERS[id].settings`.
+   *
+   * A bag rather than named fields because the set differs per vendor — Claude has a thinking
+   * mode, Codex has verbosity and reasoning summaries — and naming them here would put every
+   * vendor's knobs in every vendor's interface. Each provider reads only the ids it declared;
+   * `chat.ts` has already dropped everything else.
+   */
+  settings: Record<string, string>
 }
 
 export interface Provider {

@@ -39,8 +39,19 @@ export function buildOptions(
 
     ...(model ? { model } : {}),
     // Session-scoped: this overrides the user's configured effort for this request only and
-    // never writes to their config. Defaults to 'low' upstream in the request parser.
-    effort: opts.effort,
+    // never writes to their config. Defaults to 'low' upstream in the request parser, and is
+    // already coerced there against this provider's own list — which is exactly the SDK's
+    // `EffortLevel` union, so the cast asserts something the request parser guarantees.
+    effort: opts.effort as Options['effort'],
+
+    // The one declared extra for this provider. `adaptive` lets Claude decide how much to
+    // reason; `off` skips it, which is cheaper and faster on simple turns. Omitted entirely
+    // rather than passed as adaptive when unset, so the CLI's own default stands.
+    ...(opts.settings.thinking === 'off'
+      ? { thinking: { type: 'disabled' as const } }
+      : opts.settings.thinking === 'adaptive'
+        ? { thinking: { type: 'adaptive' as const } }
+        : {}),
 
     // THE FENCE. `tools` is the base set of built-in tools that exist at all for this
     // session; anything not named here cannot be called, cannot be prompted for, and cannot

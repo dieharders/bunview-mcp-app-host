@@ -119,8 +119,12 @@ export function Chat() {
   const busy = phase === 'waiting' || phase === 'streaming'
   const ready = auth?.state === 'ok'
 
-  const onSend = (prompt: string, model: ModelChoice, effort: EffortChoice) =>
-    send(provider, prompt, model, effort)
+  const onSend = (
+    prompt: string,
+    model: ModelChoice,
+    effort: EffortChoice,
+    settings: Record<string, string>,
+  ) => send(provider, prompt, model, effort, settings)
 
   return (
     <div className="flex h-full flex-col">
@@ -178,7 +182,7 @@ export function Chat() {
               onStop={stop}
               busy={busy}
               disabled={!ready}
-              providerLabel={PROVIDERS[provider].label}
+              provider={provider}
             />
           </div>
         </div>

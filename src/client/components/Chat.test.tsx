@@ -325,6 +325,86 @@ describe('Chat — composer', () => {
   })
 })
 
+/**
+ * The pickers belong to the chosen provider, not to Claude.
+ *
+ * One global list used to feed these, holding Claude's aliases and effort levels, and it was
+ * rendered whichever provider was selected — so a Codex user could pick `opus` as a model and
+ * `max` as an effort, neither of which Codex takes.
+ */
+describe('Chat — per-provider parameters', () => {
+  const values = (label: string) =>
+    Array.from((screen.getByLabelText(label) as HTMLSelectElement).options).map((o) => o.value)
+
+  test('Claude gets Claude models and its own extra knobs', async () => {
+    chooseProvider('claude')
+    mockServer({ state: 'ok', account: null, plan: 'max', subscription: true })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByLabelText('Model')).toBeDefined())
+    expect(values('Model')).toContain('opus')
+    expect(values('Model')).not.toContain('gpt-5.6-terra')
+    expect(values('Effort')).toContain('max')
+    // Declared in PROVIDERS.claude.settings, rendered without the composer knowing the vendor.
+    expect(screen.getByLabelText('Thinking')).toBeDefined()
+  })
+
+  test('Codex gets OpenAI models and its own knobs, not Claude’s', async () => {
+    chooseProvider('codex')
+    mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByLabelText('Model')).toBeDefined())
+    expect(values('Model')).toContain('gpt-5.6-terra')
+    expect(values('Model')).not.toContain('opus')
+
+    // `minimal` is a Codex effort and `max` is not — the asymmetry the shared list hid.
+    expect(values('Effort')).toContain('minimal')
+    expect(values('Effort')).not.toContain('max')
+
+    expect(screen.getByLabelText('Verbosity')).toBeDefined()
+    expect(screen.getByLabelText('Reasoning')).toBeDefined()
+    // Claude's knob must not appear for Codex.
+    expect(screen.queryByLabelText('Thinking')).toBeNull()
+  })
+
+  test('the chosen parameters actually reach the request', async () => {
+    chooseProvider('codex')
+
+    let sent: Record<string, unknown> | null = null
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/chat')) {
+        sent = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return new Response(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: 'done', sessionId: null, durationMs: 1 })}\n\n`,
+          ),
+          { headers: { 'content-type': 'text/event-stream' } },
+        )
+      }
+      if (url.includes('/api/auth')) {
+        return Response.json({ state: 'ok', account: null, plan: 'pro', subscription: true })
+      }
+      if (url.includes('/api/state')) return Response.json({ status: null, notes: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    render(<Chat />)
+
+    const box = await screen.findByPlaceholderText(/Ask Codex anything/i)
+    fireEvent.change(screen.getByLabelText('Effort'), { target: { value: 'minimal' } })
+    fireEvent.change(screen.getByLabelText('Verbosity'), { target: { value: 'low' } })
+    fireEvent.change(box, { target: { value: 'hi' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Send/i })))
+
+    // Selecting a control that never reaches the server is exactly what effort did for Codex
+    // before this: present, changeable, and ignored.
+    expect(sent!.effort).toBe('minimal')
+    expect((sent!.settings as Record<string, string>).verbosity).toBe('low')
+  })
+})
+
 describe('Chat — new conversation', () => {
   /** One SSE body, framed the way the server writes it. */
   function sse(events: unknown[]): Response {

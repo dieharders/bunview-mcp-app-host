@@ -10,8 +10,9 @@ import {
   DEFAULT_EFFORT,
   DEFAULT_MODEL,
   DEFAULT_PROVIDER,
-  EFFORTS,
-  MODELS,
+  PROVIDERS,
+  coerceChoice,
+  coerceSettings,
   errorCopy,
   type AppEvent,
   type EffortChoice,
@@ -47,19 +48,21 @@ export async function handleChat(req: Request): Promise<Response> {
 
   const sessionId = typeof body?.sessionId === 'string' ? body.sessionId : null
 
-  // Narrowed against the published unions rather than trusted: these reach a subprocess
-  // argument list, and an unrecognised value should fall back to the safe default rather
-  // than be forwarded.
-  const model: ModelChoice = MODELS.includes(body?.model as ModelChoice)
-    ? (body?.model as ModelChoice)
-    : DEFAULT_MODEL
-  const effort: EffortChoice = EFFORTS.includes(body?.effort as EffortChoice)
-    ? (body?.effort as EffortChoice)
-    : DEFAULT_EFFORT
-
   // Falls back rather than rejecting: an unknown id is a stale client, not an attack, and the
   // default provider is a safe place to land.
   const provider = getProvider(body?.provider)
+
+  // Narrowed against THIS PROVIDER'S published lists rather than a global one. These reach a
+  // subprocess argument list, and the lists differ per vendor: `opus` is a Claude alias and
+  // `minimal` is a Codex effort, so a client holding the other vendor's list — a stale tab, a
+  // provider switched mid-session — would otherwise put a value on a command line that
+  // rejects it. Unrecognised falls back to the safe default rather than being forwarded.
+  const info = PROVIDERS[provider.id]
+  const model: ModelChoice = coerceChoice(info.models, body?.model, DEFAULT_MODEL)
+  const effort: EffortChoice = coerceChoice(info.efforts, body?.effort, DEFAULT_EFFORT)
+  // Same narrowing for the declared extras, plus: anything the provider did not declare is
+  // dropped entirely, so a key invented by a client never reaches a provider's flag mapping.
+  const settings = coerceSettings(provider.id, body?.settings)
 
   // BOTH disconnect signals, deliberately. `req.signal` is Bun's client-disconnect notice;
   // the stream's own cancel() fires when the response body is torn down. They usually both
@@ -81,7 +84,7 @@ export async function handleChat(req: Request): Promise<Response> {
 
       try {
         for await (const event of provider.stream(
-          { prompt, sessionId, model, effort },
+          { prompt, sessionId, model, effort, settings },
           ac.signal,
         )) {
           controller.enqueue(frame(event))

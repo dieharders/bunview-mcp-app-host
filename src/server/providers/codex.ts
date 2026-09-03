@@ -160,6 +160,55 @@ const TOOL_LABELS: Record<string, string> = {
   web_search: 'WebSearch',
 }
 
+/**
+ * The argv for one turn.
+ *
+ * EXPORTED FOR TESTS, and split out because this is where the second-turn bug lived.
+ *
+ * `codex exec` and `codex exec resume` DO NOT ACCEPT THE SAME FLAGS. `-s/--sandbox` exists on
+ * `exec` and not on `exec resume`; `--json`, `--skip-git-repo-check` and `-m/--model` exist on
+ * both. The old code pushed `--sandbox read-only` unconditionally, so turn one worked and
+ * every turn after it died on:
+ *
+ *     error: unexpected argument '--sandbox' found
+ *
+ * which is a clap parse failure, so the process exits non-zero before emitting a single JSON
+ * line — surfacing as "Codex couldn't finish that request" with nothing in the transcript.
+ *
+ * The fix is not to special-case the flag but to stop using it. Every knob below goes through
+ * `-c key=value`, which `exec` and `exec resume` both accept, so the two forms differ ONLY in
+ * the `resume <id>` subcommand. There is no longer a flag that is valid on one and not the
+ * other, which is the property that keeps this from regressing.
+ *
+ * Values are TOML-encoded, hence the quotes: `-c` parses its value as TOML and falls back to a
+ * raw string, so an unquoted value would work by accident until one of them looked like a
+ * number or a bare keyword.
+ */
+export function buildArgs(argv: string[], opts: StreamOptions): string[] {
+  const toml = (v: string) => JSON.stringify(v)
+
+  const flags = ['--json', '--skip-git-repo-check']
+
+  // Read-only sandbox, matching the Claude provider's posture. Stated explicitly rather than
+  // relying on Codex's default so a future default change cannot silently widen it.
+  flags.push('-c', `sandbox_mode=${toml('read-only')}`)
+  flags.push('-c', `model_reasoning_effort=${toml(opts.effort)}`)
+
+  // Declared extras. Read by id; `chat.ts` has already coerced them against this provider's
+  // own list, so an unknown key cannot arrive here and a bad value cannot either.
+  const verbosity = opts.settings.verbosity
+  if (verbosity) flags.push('-c', `model_verbosity=${toml(verbosity)}`)
+  const summary = opts.settings.summary
+  if (summary) flags.push('-c', `model_reasoning_summary=${toml(summary)}`)
+
+  if (opts.model !== 'default') flags.push('--model', opts.model)
+
+  // Resume is a SUBCOMMAND, not a flag: `codex exec resume <id> [OPTIONS] [PROMPT]`.
+  const subcommand = opts.sessionId ? ['resume', opts.sessionId] : []
+
+  return [...argv, 'exec', ...subcommand, ...flags, opts.prompt]
+}
+
 async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator<AppEvent> {
   const found = await discover()
   if (!isInstalled(found)) {
@@ -167,16 +216,7 @@ async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator
     return
   }
 
-  const args = [...found.argv, 'exec', '--json', '--skip-git-repo-check']
-
-  // Read-only sandbox, matching the Claude provider's posture. Codex defaults to read-only
-  // already; saying so explicitly means a future default change cannot silently widen this.
-  args.push('--sandbox', 'read-only')
-
-  if (opts.model !== 'default') args.push('--model', opts.model)
-  // Resume is a SUBCOMMAND here, not a flag: `codex exec resume <id> "<prompt>"`.
-  if (opts.sessionId) args.splice(found.argv.length + 1, 0, 'resume', opts.sessionId)
-  args.push(opts.prompt)
+  const args = buildArgs(found.argv, opts)
 
   const proc = Bun.spawn(args, {
     stdin: 'ignore',

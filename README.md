@@ -105,13 +105,7 @@ Try: **“Set the app status to hello and add a note.”** The panel updates as 
 | Streaming       | token by token   | **per message**               |
 | App's MCP tools | yes, in-process  | **no**                        |
 
-Codex still requires testing and validation.
-
-> The Codex provider is written against OpenAI's published CLI reference and has **not** been
-> exercised against a real `codex` install. Its event mapping is deliberately tolerant, so an
-> unverified field name degrades to "no event" rather than a crash — but treat it as untested.
-
-**Note** Codex's own tools work fine. What is missing is _BunView's_ tools, the reason is the registration channel. The Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no channel to answer on.
+**Note** What is missing is _BunView's_ tools, the reason is the registration channel. The Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no channel to answer on.
 
 It is still doable: Codex reads MCP servers from `~/.codex/config.toml`, and a `url` entry there uses streamable HTTP, so BunView could serve `POST /mcp` from the Bun server it already runs and keep the tools in-process after all. The costs are what stopped it — it writes to the user's **global** config rather than being scoped to a session, it currently needs `experimental_use_rmcp_client = true`, and it means implementing the MCP wire protocol rather than calling a helper.
 
@@ -221,7 +215,7 @@ Read-only.
 | `BUNVIEW_PERMISSION_MODE`              | `dontAsk`                        | `bypassPermissions` additionally requires `BUNVIEW_ALLOW_BYPASS=1` |
 | `BUNVIEW_SETTING_SOURCES`              | _(empty)_                        | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers  |
 | `BUNVIEW_CWD`                          | `homedir()`                      | Session bucket, and the only directory the file tools can reach    |
-| `BUNVIEW_MODEL`                        | _(CLI default)_                  | Also selectable per-message in the UI                              |
+| `BUNVIEW_MODEL`                        | _(CLI default)_                  | Claude only. Also selectable per-message in the UI                 |
 | `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                   | Explicit path to the Claude binary                                 |
 | `BUNVIEW_CODEX_PATH`                   | _(discovered)_                   | Explicit path to the Codex binary                                  |
 | `BUNVIEW_ALLOW_INSTALL`                | `1`                              | Offer to install a missing CLI. Set `0` for managed/offline builds |
@@ -298,6 +292,20 @@ Two endpoints reach outside the app's own process, and both are gated behind an 
 
 Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`, `stream()` — in a file beside `claude.ts` and `codex.ts`, add it to `PROVIDERS` in [`shared/events.ts`](src/shared/events.ts) and to the registry in [`providers/index.ts`](src/server/providers/index.ts). Because `stream()` yields only `AppEvent`, the frontend needs no changes — it cannot tell the vendors apart.
 
+### Per-provider parameters
+
+`models`, `efforts` and `settings` on `ProviderInfo` are what the composer renders and what [`chat.ts`](src/server/chat.ts) validates against. **These are per vendor and must not be shared.**
+
+|         | Claude Code                           | Codex                                              |
+| ------- | ------------------------------------- | -------------------------------------------------- |
+| Models  | `opus`, `sonnet`, `haiku`, `fable`    | `gpt-6-astra`, `gpt-5.6-sol/terra/luna`, `gpt-5.5` |
+| Efforts | `low`→`max` (the SDK's `EffortLevel`) | `minimal`→`xhigh` (`model_reasoning_effort`)       |
+| Extra   | `thinking`                            | `verbosity`, `summary`                             |
+
+Both lists put the vendor's own default model first.
+
+`settings` is a declared list rather than named fields, so adding a knob is a data change here and no branch in the composer. Keep them to **quality and presentation**. The sandbox, tool list and permission mode come from the environment on purpose (see [Safety defaults](#safety-defaults)); putting any of them behind a dropdown hands every user a control the safety posture assumes nobody has.
+
 Discovery is shared: [`discovery.ts`](src/server/providers/discovery.ts) takes a `CliSpec` (binary name, npm package, path to the real entry point) and returns a spawnable **argv** rather than a bare path.
 
 It tries five rungs, in this order:
@@ -361,19 +369,3 @@ await Bun.build({
   minify: true,
 })
 ```
-
-## License
-
-BunView is [MIT](LICENSE) licensed. Fork it, ship it closed-source, no attribution beyond the
-license notice.
-
-That covers **this repo's code only**. Two things it deliberately does not cover:
-
-- **`@anthropic-ai/claude-agent-sdk`** is not open source — its `LICENSE.md` reads _"© Anthropic
-  PBC. All rights reserved,"_ with use subject to Anthropic's
-  [legal agreements](https://code.claude.com/docs/en/legal-and-compliance).
-- **The agent CLIs** the app discovers, installs and spawns (`claude`, `codex`) are the vendors'
-  own binaries under the vendors' own terms. BunView never redistributes them; `POST /api/install`
-  downloads them from the vendor at runtime.
-
-Every other runtime dependency is MIT, except `lucide-react`, which is ISC.

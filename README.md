@@ -1,4 +1,4 @@
-# BunView - A native app using your Claude/ChatGPT subscription
+# BunView — A desktop MCP app host using your Claude/ChatGPT subscription
 
 A minimal desktop scaffold for a native app to connect a user's chatGPT/Claude subscription plan.
 

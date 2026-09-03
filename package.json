@@ -1,9 +1,9 @@
 {
-  "name": "bunview",
+  "name": "bunview-mcp-app-host",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Bun + WebView scaffold for desktop apps that run on an agent subscription plan.",
+  "description": "Bun + WebView desktop app scaffold that hosts MCP tools on a Claude Code / Codex subscription.",
   "scripts": {
     "dev": "bun run build:css && bun run --parallel dev:css dev:app",
     "dev:headless": "bun run build:css && bun run --parallel dev:css dev:app:headless",

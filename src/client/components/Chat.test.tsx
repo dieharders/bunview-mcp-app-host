@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { PROVIDERS } from '../../shared/events'
 import { Chat } from './Chat'
 
 /** Stand in for the server so the tree can mount without one. */
@@ -23,7 +24,7 @@ describe('Chat — provider gate', () => {
 
     render(<Chat />)
 
-    expect(screen.getByRole('heading', { name: /Connect an AI plan/i })).toBeDefined()
+    expect(screen.getByRole('heading', { name: /Connect your AI plan/i })).toBeDefined()
     expect(screen.getByText('Claude Code')).toBeDefined()
     expect(screen.getByText('Codex')).toBeDefined()
 
@@ -32,11 +33,26 @@ describe('Chat — provider gate', () => {
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  test('states Codex’s limitations up front rather than after committing', () => {
+  test('states what each provider commits you to, before anything is probed', () => {
     globalThis.fetch = mock(async () => Response.json({})) as unknown as typeof fetch
     render(<Chat />)
 
-    expect(screen.getByText(/token by token/i)).toBeDefined()
+    // Driven off the registry rather than copied out of it. This test used to assert one
+    // provider's caveat verbatim (`/token by token/i`) and went stale the moment the wording
+    // changed — while its sibling below kept passing vacuously, because a `queryBy*` for text
+    // that no longer exists returns null whether or not the element is there. Reading the
+    // expected copy from PROVIDERS means adding a provider extends the test for free, and
+    // rewording one cannot silently un-cover it.
+    for (const info of Object.values(PROVIDERS)) {
+      expect(screen.getByText(info.label)).toBeDefined()
+      expect(screen.getByText(`Runs on ${info.plan}`)).toBeDefined()
+      expect(screen.getByText(info.npmPackage)).toBeDefined()
+
+      // A limitation met after committing reads as a bug; the same sentence up front is just a
+      // trade-off. Every caveat is currently empty, so this asserts nothing today — it starts
+      // guarding again the moment one is filled in.
+      if (info.caveat) expect(screen.getByText(info.caveat)).toBeDefined()
+    }
   })
 
   test('a remembered choice skips the picker', async () => {
@@ -44,7 +60,7 @@ describe('Chat — provider gate', () => {
     mockServer({ state: 'ok', account: 'me@example.com', plan: 'max', subscription: true })
     render(<Chat />)
 
-    expect(screen.queryByRole('heading', { name: /Connect an AI plan/i })).toBeNull()
+    expect(screen.queryByRole('heading', { name: /Connect your AI plan/i })).toBeNull()
     await waitFor(() => expect(screen.getByText(/Claude Code max/i)).toBeDefined())
   })
 })

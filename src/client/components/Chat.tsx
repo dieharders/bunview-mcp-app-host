@@ -45,6 +45,9 @@ export function Chat() {
   // first render already knows, rather than flashing the picker at a returning user.
   const [provider, setProvider] = useState<ProviderId | null>(readStoredProvider)
   const [auth, setAuth] = useState<AuthResponse | null>(null)
+  // The unsent prompt lives here rather than in the composer, so a starter hint in the empty
+  // conversation can fill it.
+  const [draft, setDraft] = useState('')
 
   const loadAuth = useCallback(() => {
     if (!provider) return
@@ -129,7 +132,14 @@ export function Chat() {
 
       <div className="flex min-h-0 flex-1">
         <div className="flex min-w-0 flex-1 flex-col">
-          <MessageList messages={messages} waiting={phase === 'waiting'} className="flex-1" />
+          <MessageList
+            messages={messages}
+            waiting={phase === 'waiting'}
+            // Only where the starter prompts would actually work: they demonstrate this app's
+            // own tools, which not every provider can be given.
+            onPickPrompt={PROVIDERS[provider].appTools ? setDraft : undefined}
+            className="flex-1"
+          />
 
           {error && (
             <p role="alert" className="px-4 pb-2 text-xs text-red-300">
@@ -139,6 +149,8 @@ export function Chat() {
 
           <div className="p-4 pt-0">
             <Composer
+              value={draft}
+              onChange={setDraft}
               onSend={onSend}
               onStop={stop}
               busy={busy}

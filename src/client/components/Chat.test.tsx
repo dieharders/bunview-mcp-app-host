@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { Chat } from './Chat'
 
 /** Stand in for the server so the tree can mount without one. */
@@ -76,6 +76,29 @@ describe('Chat — signed in', () => {
     render(<Chat />)
 
     await waitFor(() => expect(screen.getByText(/billed per token/i)).toBeDefined())
+  })
+
+  test('a starter prompt fills the composer instead of sending it', async () => {
+    chooseProvider('claude')
+    mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
+    render(<Chat />)
+
+    const hint = await screen.findByRole('button', { name: /set_status/i })
+    fireEvent.click(hint)
+
+    const box = screen.getByPlaceholderText(/Ask Claude Code anything/i) as HTMLTextAreaElement
+    expect(box.value).toMatch(/status/i)
+    // Filling is not sending: nothing was posted to the agent.
+    expect(screen.queryByLabelText('Waiting for a response')).toBeNull()
+  })
+
+  test('hides the starter prompts for a provider that cannot reach the app’s tools', async () => {
+    chooseProvider('codex')
+    mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByText(/Codex pro/i)).toBeDefined())
+    expect(screen.queryByRole('button', { name: /set_status/i })).toBeNull()
   })
 
   test('offers model and effort pickers, defaulting effort to low', async () => {

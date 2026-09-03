@@ -3,6 +3,7 @@ import { Sparkles, Wrench } from 'lucide-react'
 import type { ChatMessage } from '../hooks/useClaudeStream'
 import { cn } from '../lib/cn'
 import { prefersReducedMotion } from '../lib/motion'
+import { PromptHints } from './PromptHints'
 
 /**
  * The conversation, as bubbles.
@@ -12,11 +13,15 @@ import { prefersReducedMotion } from '../lib/motion'
 export function MessageList({
   messages,
   waiting,
+  onPickPrompt,
   className,
 }: {
   messages: ChatMessage[]
   /** True between Send and the first token: show the indicator with no bubble behind it. */
   waiting: boolean
+  /** Fills the composer with a starter prompt. Omit to show the empty state bare — which is
+   *  what a provider that cannot reach this app's tools gets. */
+  onPickPrompt?: (prompt: string) => void
   className?: string
 }) {
   const scroller = useRef<HTMLDivElement>(null)
@@ -71,9 +76,10 @@ export function MessageList({
       {waiting && <TypingIndicator />}
 
       {messages.length === 0 && !waiting && (
-        <p className="m-auto max-w-sm text-center text-sm text-slate-500">
-          Ask something. Runs on your subscription.
-        </p>
+        <div className="m-auto flex w-full max-w-sm flex-col gap-4">
+          <p className="text-center text-sm text-slate-500">Ask something or try a tool example below.<br /> This will use your subscription plan.</p>
+          {onPickPrompt && <PromptHints onPick={onPickPrompt} />}
+        </div>
       )}
     </div>
   )

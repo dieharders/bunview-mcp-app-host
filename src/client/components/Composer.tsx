@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import { Send, Square } from 'lucide-react'
 import {
   DEFAULT_EFFORT,
@@ -14,12 +14,17 @@ import { Select } from './ui/Select'
 const MAX_CHARS = 24_000
 
 export function Composer({
+  value,
+  onChange,
   onSend,
   onStop,
   busy,
   disabled,
   providerLabel,
 }: {
+  /** Controlled, so a starter prompt can be dropped in from outside. */
+  value: string
+  onChange: (next: string) => void
   onSend: (prompt: string, model: ModelChoice, effort: EffortChoice) => void
   onStop: () => void
   busy: boolean
@@ -27,17 +32,29 @@ export function Composer({
   /** Whose agent this is, so the placeholder names the thing the user actually chose. */
   providerLabel: string
 }) {
-  const [value, setValue] = useState('')
   const [model, setModel] = useState<ModelChoice>(DEFAULT_MODEL)
   const [effort, setEffort] = useState<EffortChoice>(DEFAULT_EFFORT)
   const box = useRef<HTMLTextAreaElement>(null)
 
+  // Auto-grow, driven by the value rather than by the keystroke, so text that never passes
+  // through onChange — a starter prompt, the clear after Send — sizes the box too. Reset to
+  // auto first, or the box can only ever grow.
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el) return
+    el.style.height = 'auto'
+    if (value) {
+      el.style.height = `${Math.min(el.scrollHeight, 200)}px`
+      // Filled from outside: put the cursor where the user now has to keep typing. Skipped
+      // while they type, since the box is already the active element.
+      if (document.activeElement !== el) el.focus()
+    }
+  }, [value])
+
   const submit = () => {
     if (busy || disabled || !value.trim()) return
     onSend(value, model, effort)
-    setValue('')
-    // Reset the auto-grow, or the box keeps the height of the message just sent.
-    if (box.current) box.current.style.height = 'auto'
+    onChange('')
   }
 
   return (
@@ -45,12 +62,7 @@ export function Composer({
       <textarea
         ref={box}
         value={value}
-        onChange={(e) => {
-          setValue(e.target.value)
-          // Auto-grow: reset to auto first so the box can also SHRINK when text is deleted.
-          e.target.style.height = 'auto'
-          e.target.style.height = `${Math.min(e.target.scrollHeight, 200)}px`
-        }}
+        onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
             e.preventDefault()

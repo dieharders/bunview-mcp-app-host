@@ -89,6 +89,12 @@ export interface ProviderInfo {
   npmPackage: string
   /** Command the user would type to sign in, shown in the setup banner. */
   loginCommand: string
+  /**
+   * Whether this app's OWN tools reach the agent. False means the starter prompts that
+   * demonstrate them are hidden, because suggesting a tool the agent cannot call is worse
+   * than suggesting nothing. See `src/server/providers/codex.ts` for why Codex is false.
+   */
+  appTools: boolean
   /** Honest note about what this provider cannot do here. Empty when nothing is missing. */
   caveat: string
 }
@@ -101,6 +107,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     plan: 'Claude Pro or Max',
     npmPackage: '@anthropic-ai/claude-code',
     loginCommand: 'claude auth login',
+    appTools: true,
     caveat: '',
   },
   codex: {
@@ -110,6 +117,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     plan: 'ChatGPT Plus, Pro or Business',
     npmPackage: '@openai/codex',
     loginCommand: 'codex login',
+    appTools: false,
     // Stated in the picker rather than discovered later. Note what this does NOT say: Codex's
     // OWN tools — shell, file edits, web search, any MCP server the user has configured — work
     // fine and show up as tool chips. What is missing is BunView's own tools; see codex.ts.

@@ -140,6 +140,19 @@ export function SetupBanner({
           </>
         )}
 
+        {/* The one thing this app cannot fix for the user. It strips these before spawning any
+            CLI itself, but the sign-in window is their own login shell — so a sign-in can
+            quietly resolve against the key and leave this banner saying "not signed in"
+            forever, with nothing on screen explaining why. */}
+        {auth.apiKeyOverride && (
+          <p className="mt-1.5">
+            <Code>ANTHROPIC_API_KEY</Code> is set in your environment. BunView strips it from the
+            CLI it runs, so your subscription is what gets billed — but the sign-in window is your
+            own shell, where it still applies, and {info.label} may report you as already signed in
+            there. Unset it in that window if signing in doesn’t stick.
+          </p>
+        )}
+
         {log.length > 0 && (
           <pre className="mt-2 max-h-32 scrollbar-slim overflow-y-auto rounded-lg bg-black/30 p-2 font-mono text-[11px] leading-relaxed text-amber-200/70">
             {log.join('\n')}

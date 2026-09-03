@@ -2,9 +2,9 @@
  * Setup actions: install a missing CLI, and start a sign-in.
  *
  * These are the only two things in this app that reach outside its own process to change the
- * user's machine, so both are gated: the UI names what will happen — the vendor, the version,
- * the size and the SHA-256 for a download; a terminal window for a sign-in — and neither
- * happens without an explicit click. Nothing auto-installs: Cursor shipped a silent
+ * user's machine, so both are gated behind an explicit click: an install names the vendor and
+ * verifies the download against the SHA-256 that vendor published; a sign-in opens a terminal
+ * window. Nothing auto-installs: Cursor shipped a silent
  * auto-install of its agent in 1.6.26 and reverted it in 1.7 after user pushback.
  * `BUNVIEW_ALLOW_INSTALL=0` removes the install path entirely for managed or offline builds.
  *

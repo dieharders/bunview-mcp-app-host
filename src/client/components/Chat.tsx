@@ -54,7 +54,9 @@ export function Chat() {
     setAuth(null)
     fetchAuth(provider)
       .then(setAuth)
-      .catch(() => setAuth({ state: 'unknown' }))
+      // false, not a guess: only the server can see the environment, and reaching it is
+      // exactly what just failed.
+      .catch(() => setAuth({ state: 'unknown', apiKeyOverride: false }))
   }, [provider])
 
   useEffect(() => loadAuth(), [loadAuth])

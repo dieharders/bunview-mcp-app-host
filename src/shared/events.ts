@@ -168,19 +168,39 @@ export interface ChatRequest {
   effort: EffortChoice
 }
 
+/**
+ * Carried by every auth shape, not only the signed-in one.
+ *
+ * True when the environment holds a variable that would point the CLI at metered API billing
+ * instead of the user's plan — `ANTHROPIC_API_KEY` and the Bedrock/Vertex switches.
+ *
+ * This app strips those from every CLI it spawns, so nothing it runs is ever billed to a key.
+ * The sign-in TERMINAL is the one exception, and unavoidably so: it is the user's own login
+ * shell, which re-reads their profile after we hand it the command. A login started there can
+ * therefore no-op as "already authenticated" against the key while this app, reading status
+ * with the key stripped, still reports signed-out — a Retry loop with no visible cause.
+ *
+ * Telling the user is the only fix that does not involve dictating their shell environment.
+ */
+interface EnvOverride {
+  apiKeyOverride: boolean
+}
+
 /** Shape of `GET /api/auth`. Mirrors the provider's auth report, narrowed for the browser. */
-export type AuthResponse =
-  | { state: 'ok'; account: string | null; plan: string | null; subscription: boolean }
-  | { state: 'logged_out' }
-  | {
-      state: 'cli_missing'
-      searched: string[]
-      unresolvedShim: string | null
-      /** Whether to offer an Install button. Decided on the server, whose preconditions
-       *  (and BUNVIEW_ALLOW_INSTALL) the browser cannot see. */
-      canInstall: boolean
-    }
-  | { state: 'unknown' }
+export type AuthResponse = EnvOverride &
+  (
+    | { state: 'ok'; account: string | null; plan: string | null; subscription: boolean }
+    | { state: 'logged_out' }
+    | {
+        state: 'cli_missing'
+        searched: string[]
+        unresolvedShim: string | null
+        /** Whether to offer an Install button. Decided on the server, whose preconditions
+         *  (and BUNVIEW_ALLOW_INSTALL) the browser cannot see. */
+        canInstall: boolean
+      }
+    | { state: 'unknown' }
+  )
 
 /**
  * Progress from a setup action that changes the user's machine (installing a CLI) or opens an

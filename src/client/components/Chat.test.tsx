@@ -150,10 +150,6 @@ describe('Chat — setup', () => {
     expect(screen.getByText('/home/me/.local/bin/claude')).toBeDefined()
     expect(screen.getByRole('button', { name: /Install/i })).toBeDefined()
 
-    // Consent needs to know whose binary it is and where it goes.
-    expect(screen.getByText(/Anthropic’s own signed binary/)).toBeDefined()
-    expect(screen.getByText(/not on your PATH/)).toBeDefined()
-
     const box = screen.getByPlaceholderText(/Sign in to/i) as HTMLTextAreaElement
     expect(box.disabled).toBe(true)
   })

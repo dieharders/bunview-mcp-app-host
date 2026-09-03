@@ -113,9 +113,7 @@ export function SetupBanner({
         {missing && (
           <>
             <p>
-              {info.label} isn’t installed. BunView can download {info.vendor}’s own signed binary
-              and verify its checksum — no npm, no Node, no admin rights. It goes in BunView’s data
-              folder, not on your PATH, so uninstalling is deleting a folder.
+              {info.label} isn’t installed. BunView can download and install {info.vendor} for you.
             </p>
             {auth.unresolvedShim && (
               <p className="mt-1.5">

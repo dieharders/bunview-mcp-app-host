@@ -245,3 +245,19 @@ await Bun.build({
   minify: true,
 })
 ```
+
+## License
+
+BunView is [MIT](LICENSE) licensed. Fork it, ship it closed-source, no attribution beyond the
+license notice.
+
+That covers **this repo's code only**. Two things it deliberately does not cover:
+
+- **`@anthropic-ai/claude-agent-sdk`** is not open source — its `LICENSE.md` reads _"© Anthropic
+  PBC. All rights reserved,"_ with use subject to Anthropic's
+  [legal agreements](https://code.claude.com/docs/en/legal-and-compliance).
+- **The agent CLIs** the app discovers, installs and spawns (`claude`, `codex`) are the vendors'
+  own binaries under the vendors' own terms. BunView never redistributes them; `POST /api/install`
+  downloads them from the vendor at runtime.
+
+Every other runtime dependency is MIT, except `lucide-react`, which is ISC.

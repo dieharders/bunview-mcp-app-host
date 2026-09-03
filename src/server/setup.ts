@@ -140,12 +140,8 @@ export async function handleInstall(req: Request): Promise<Response> {
  *
  * Handing the command to a terminal delegates to the vendor's own proven interactive path. The
  * banner then says "finish signing in, then press Retry", and `GET /api/auth` is the check.
- *
- * What the terminal gets is the DISCOVERED ARGV, never the bare `codex login` the banner
- * prints. A managed install lives in this app's data directory and deliberately not on PATH
- * (see install/platform.ts), so a bare name is exactly the case that cannot work: the window
- * opens on "'codex' is not recognized as an internal or external command" and the user is
- * stranded one click short of signing in, with the CLI sitting installed on disk.
+ * A managed install lives in this app's data directory and deliberately not on PATH
+ * (see install/platform.ts).
  */
 export async function handleLogin(req: Request): Promise<Response> {
   const body = (await req.json().catch(() => null)) as unknown
@@ -173,9 +169,7 @@ export async function handleLogin(req: Request): Promise<Response> {
   const loginArgv = [...argv, ...info.loginArgs]
 
   // The RESOLVED command, not `info.loginCommand`. These two messages are the ones that tell
-  // the user to go type it themselves, so handing them the pretty bare name would reproduce
-  // the original failure by hand — for a managed install it is the one command guaranteed not
-  // to work. Quoting is for reading and pasting, so it only wraps what actually needs it.
+  // the user to go type it themselves. Quoting is for reading and pasting, so it only wraps what actually needs it.
   const command = loginArgv.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
 
   try {
@@ -208,8 +202,7 @@ export async function handleLogin(req: Request): Promise<Response> {
  *
  * Single quotes rather than escaping, because inside them every character except `'` is
  * literal — no expansion, no globbing, no `$`. The discovered path is not user input, but it
- * routinely contains spaces (`~/Library/Application Support/…`), and a helper that is correct
- * for every byte needs no judgement call about which ones to worry about.
+ * routinely contains spaces (`~/Library/Application Support/…`).
  */
 const shQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
 

@@ -68,7 +68,11 @@ export function SetupBanner({
         const result = await startLogin(provider)
         setNote(result.type === 'done' ? result.message : null)
       } catch {
-        setNote(`Couldn’t start sign-in. Run \`${PROVIDERS[provider].loginCommand}\` yourself.`)
+        // No command named here on purpose. The client does not know the discovered argv, and
+        // the bare `codex login` it used to print is exactly the advice that fails for a
+        // managed install. When the server can answer at all it sends the resolved command
+        // itself; this branch only runs when it could not be reached.
+        setNote('Couldn’t reach BunView to start sign-in. Try again.')
       } finally {
         setBusy(null)
       }
@@ -79,6 +83,9 @@ export function SetupBanner({
 
   const info = PROVIDERS[provider]
   const missing = auth.state === 'cli_missing'
+  // The one "missing" state a sign-in can still act on: the shim is on PATH, so a terminal —
+  // which has a real shell and a real PATH — can run it even though this process cannot.
+  const shimOnly = auth.state === 'cli_missing' && Boolean(auth.unresolvedShim)
 
   return (
     <div
@@ -106,9 +113,7 @@ export function SetupBanner({
         {missing && (
           <>
             <p>
-              {info.label} isn’t installed. BunView can download {info.vendor}’s own signed binary
-              and verify its checksum — no npm, no Node, no admin rights. It goes in BunView’s data
-              folder, not on your PATH, so uninstalling is deleting a folder.
+              {info.label} isn’t installed. BunView can download and install {info.vendor} for you.
             </p>
             {auth.unresolvedShim && (
               <p className="mt-1.5">
@@ -135,6 +140,19 @@ export function SetupBanner({
           </>
         )}
 
+        {/* The one thing this app cannot fix for the user. It strips these before spawning any
+            CLI itself, but the sign-in window is their own login shell — so a sign-in can
+            quietly resolve against the key and leave this banner saying "not signed in"
+            forever, with nothing on screen explaining why. */}
+        {auth.apiKeyOverride && (
+          <p className="mt-1.5">
+            <Code>ANTHROPIC_API_KEY</Code> is set in your environment. BunView strips it from the
+            CLI it runs, so your subscription is what gets billed — but the sign-in window is your
+            own shell, where it still applies, and {info.label} may report you as already signed in
+            there. Unset it in that window if signing in doesn’t stick.
+          </p>
+        )}
+
         {log.length > 0 && (
           <pre className="mt-2 max-h-32 scrollbar-slim overflow-y-auto rounded-lg bg-black/30 p-2 font-mono text-[11px] leading-relaxed text-amber-200/70">
             {log.join('\n')}
@@ -152,8 +170,11 @@ export function SetupBanner({
           </Button>
         )}
 
-        {/* Signing in needs the binary, so it only appears once there is one to run. */}
-        {!missing && (
+        {/* Signing in needs something runnable — either a resolved binary, or a shim a real
+            terminal can resolve for itself. Without the second case the server's shim fallback
+            was unreachable: the only button that starts a sign-in was hidden in the one state
+            that fallback exists for. */}
+        {(!missing || shimOnly) && (
           <Button size="sm" onClick={login} loading={busy === 'login'} disabled={busy !== null}>
             <LogIn className="size-3.5" aria-hidden />
             Sign in

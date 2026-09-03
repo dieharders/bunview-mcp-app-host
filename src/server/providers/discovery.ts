@@ -26,6 +26,7 @@
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { managedBinaryPath } from '../install'
+import type { ProviderDetection } from './types'
 
 export interface CliSpec {
   /** Command name as it appears on PATH. */
@@ -44,15 +45,22 @@ export interface CliSpec {
   managedPath?: string
 }
 
-export interface Discovery {
-  /** Argv prefix to spawn, already resolved. Empty when nothing was found. */
-  argv: string[]
-  /** The primary executable, for APIs that want one path. Null when not found. */
+/**
+ * What discovery knows, which is the provider seam's `ProviderDetection` plus one field.
+ *
+ * Declared as an EXTENSION rather than a second interface with the same members. As twins the
+ * two drifted silently — `argv` was added to one and hand-copied into the other by each
+ * provider's `detect`, and the copy that dropped it still typechecked.
+ */
+export interface Discovery extends ProviderDetection {
+  /**
+   * The primary executable, for the one API that wants a single string: the Agent SDK's
+   * `pathToClaudeCodeExecutable`. Null when not found.
+   *
+   * Kept OFF `ProviderDetection` so nothing else can reach for it. For a Node-launcher entry
+   * point this is the `.js`, and spawning it alone execs a script as an image.
+   */
   path: string | null
-  /** Everything tried, in order. This list IS the "not found" UI. */
-  searched: string[]
-  /** Set when a Windows shim was found but the executable it points at was not. */
-  unresolvedShim: string | null
 }
 
 const IS_WIN = process.platform === 'win32'
@@ -67,12 +75,39 @@ const NOT_FOUND: Discovery = { argv: [], path: null, searched: [], unresolvedShi
  *
  * A `.js` entry point is a Node launcher, not an executable — running it directly either
  * fails or, worse on Windows, gets opened by whatever is registered for .js files.
+ *
+ * The fallback is the bare name `node`, NOT `process.execPath`. In a compiled build
+ * (`bun build --compile`) `process.execPath` is this app's own executable, and a Bun
+ * single-file binary ignores a trailing script argument — so handing that argv to a terminal
+ * opens a second copy of BunView instead of the CLI. A bare `node` fails honestly when it is
+ * absent, and resolves correctly in the login shell of the terminal we hand it to, which is
+ * exactly the environment `candidates()` below exists because this process does not have.
  */
 function toArgv(target: string): string[] {
   if (!target.toLowerCase().endsWith('.js')) return [target]
-  const node = Bun.which('node') ?? process.execPath
-  return [node, target]
+  return [Bun.which('node') ?? 'node', target]
 }
+
+/**
+ * The argv to spawn for a discovery result, or [] when there is nothing runnable.
+ *
+ * One predicate, because there were three: `!path`, `argv.length === 0`, and a locally
+ * rebuilt argv-or-shim ternary, spread across both providers, install verification and
+ * sign-in. They are not equivalent — a Node-launcher entry point has a `.js` `path` and a
+ * two-element `argv` — so which one a new call site picked decided whether it worked.
+ *
+ * The shim is a last resort and only for a terminal. discovery's header rejects cmd.exe for a
+ * chat turn because it re-parses the user's prompt and orphans the real process on cancel; a
+ * sign-in passes no user text and is meant to outlive the request in its own window, so
+ * neither objection applies there.
+ */
+export function spawnableArgv(d: ProviderDetection): string[] {
+  if (d.argv.length > 0) return d.argv
+  return d.unresolvedShim ? [d.unresolvedShim] : []
+}
+
+/** Whether anything runnable was found. */
+export const isInstalled = (d: ProviderDetection): boolean => d.argv.length > 0
 
 /**
  * Map an npm Windows shim to the entry point it launches.
@@ -152,6 +187,10 @@ export function discoverCli(spec: CliSpec, override?: string): Promise<Discovery
   let found = cache.get(key)
   if (!found) {
     found = runDiscovery(spec, override)
+    // Never memoise a rejection. This cache lives as long as the process, so one transient
+    // failure would otherwise leave the CLI permanently undiscoverable — including to the
+    // Retry the user presses to recover.
+    void found.catch(() => cache.delete(key))
     cache.set(key, found)
   }
   return found
@@ -168,25 +207,38 @@ async function runDiscovery(spec: CliSpec, override?: string): Promise<Discovery
   if (override) {
     searched.push(`override (${override})`)
     if (await exists(override)) {
-      const target = SHIM_EXT.test(override) ? await resolveShim(override, spec) : override
+      // Shim resolution is a Windows npm concern. Without the platform guard a leftover
+      // `…\codex.cmd` in this variable on macOS was reported as an `unresolvedShim`, and
+      // sign-in then fed a batch file to the user's shell.
+      const target =
+        IS_WIN && SHIM_EXT.test(override) ? await resolveShim(override, spec) : override
       if (target) return { argv: toArgv(target), path: target, searched, unresolvedShim: null }
       return { ...NOT_FOUND, searched, unresolvedShim: override }
     }
     return { ...NOT_FOUND, searched }
   }
 
+  // A shim we could not resolve is REMEMBERED, not returned. Returning here meant a dead
+  // `%APPDATA%\npm\codex.cmd` masked every later rung: the user installed a managed copy,
+  // discovery stopped at the dead shim again, and the banner reported the download missing
+  // for a binary sitting on disk — an install loop with no exit. It is only worth reporting
+  // once nothing better has been found.
+  let unresolvedShim: string | null = null
+
   // 2. PATH. On Windows this is the shim, which is what resolveShim is for.
   const which = Bun.which(spec.binary)
   if (which) {
     searched.push(`PATH (${which})`)
-    if (SHIM_EXT.test(which)) {
+    if (IS_WIN && SHIM_EXT.test(which)) {
       const target = await resolveShim(which, spec)
-      // Deliberately NOT falling back to spawning the shim — see the header comment on why
-      // routing a user-typed prompt through cmd.exe is not an acceptable degradation.
+      // Deliberately NOT returning the shim as `argv` — see the header comment on why routing
+      // a user-typed prompt through cmd.exe is not an acceptable degradation. Sign-in may
+      // still fall back to it; a chat turn may not. See `spawnableArgv`.
       if (target) return { argv: toArgv(target), path: target, searched, unresolvedShim: null }
-      return { ...NOT_FOUND, searched, unresolvedShim: which }
+      unresolvedShim = which
+    } else {
+      return { argv: toArgv(which), path: which, searched, unresolvedShim: null }
     }
-    return { argv: toArgv(which), path: which, searched, unresolvedShim: null }
   }
 
   // 3. Well-known locations, for the GUI-launch case.
@@ -201,7 +253,7 @@ async function runDiscovery(spec: CliSpec, override?: string): Promise<Discovery
     }
   }
 
-  return { ...NOT_FOUND, searched }
+  return { ...NOT_FOUND, searched, unresolvedShim }
 }
 
 export const CLAUDE_SPEC: CliSpec = {

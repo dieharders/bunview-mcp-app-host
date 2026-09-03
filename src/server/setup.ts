@@ -2,20 +2,24 @@
  * Setup actions: install a missing CLI, and start a sign-in.
  *
  * These are the only two things in this app that reach outside its own process to change the
- * user's machine, so both are gated: the UI names exactly what will happen — the vendor, the
- * version, the size and the SHA-256 for a download; the exact command for a sign-in — and
- * neither happens without an explicit click. Nothing auto-installs: Cursor shipped a silent
+ * user's machine, so both are gated behind an explicit click: an install names the vendor and
+ * verifies the download against the SHA-256 that vendor published; a sign-in opens a terminal
+ * window. Nothing auto-installs: Cursor shipped a silent
  * auto-install of its agent in 1.6.26 and reverted it in 1.7 after user pushback.
  * `BUNVIEW_ALLOW_INSTALL=0` removes the install path entirely for managed or offline builds.
+ *
+ * Note what the sign-in gate does NOT promise: the command the terminal receives is the
+ * RESOLVED argv, which is deliberately not the bare `codex login` a user would recognise.
+ * See `spawnableArgv` for why naming the pretty version would be naming the broken one.
  */
 import { PROVIDERS, type ProviderId, type SetupEvent } from '../shared/events'
 import { config } from './config'
-import { childEnv } from './env'
 import { ChecksumError } from './install/download'
 import { installManaged } from './install'
-import { resetDiscovery } from './providers/discovery'
+import { resetDiscovery, spawnableArgv } from './providers/discovery'
 import { getProvider } from './providers'
 import { HEARTBEAT_MS, PING, SSE_HEADERS } from './sse'
+import { displayCommand, openInTerminal } from './terminal'
 
 const INSTALL_TIMEOUT_MS = 300_000
 
@@ -89,7 +93,7 @@ export async function handleInstall(req: Request): Promise<Response> {
 
         const found = await getProvider(provider).detect()
         send(
-          found.path
+          found.argv.length > 0
             ? { type: 'done', ok: true, message: `Installed to ${path}` }
             : {
                 type: 'done',
@@ -149,32 +153,33 @@ export async function handleLogin(req: Request): Promise<Response> {
   if (!provider) return new Response('unknown provider', { status: 400 })
 
   const info = PROVIDERS[provider]
-  const found = await getProvider(provider).detect()
 
-  // An unresolved Windows shim is spawnable HERE even though `stream` refuses it. The header
-  // on discovery.ts rejects cmd.exe for a turn because it re-parses the user's prompt and
-  // orphans the real process on cancel; a sign-in passes no user text and is meant to outlive
-  // this request in its own window, so neither objection applies. Better a working login
-  // through the shim than "not installed" for a CLI the user can see.
-  const argv =
-    found.argv.length > 0 ? found.argv : found.unresolvedShim ? [found.unresolvedShim] : []
-
-  if (argv.length === 0) {
-    return Response.json(
-      { type: 'done', ok: false, message: 'The CLI is not installed yet.' } satisfies SetupEvent,
-      { status: 412 },
-    )
-  }
-
-  const loginArgv = [...argv, ...info.loginArgs]
-
-  // The RESOLVED command, not `info.loginCommand`. These two messages are the ones that tell
-  // the user to go type it themselves. Quoting is for reading and pasting, so it only wraps what actually needs it.
-  const command = loginArgv.map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' ')
+  // Held outside the try so the failure path can still name a command when it knows one.
+  // Discovery itself can throw, and that is precisely when the user most needs somewhere to
+  // go — so `detect()` belongs INSIDE the guard, not before it. Left outside, a rejected
+  // discovery escaped the handler, Bun.serve answered with a non-JSON 500, and the client's
+  // own catch printed the bare `codex login` this whole path exists to stop advising.
+  let command: string | null = null
 
   try {
-    const spawned = spawnInTerminal(loginArgv)
-    if (!spawned) {
+    const found = await getProvider(provider).detect()
+    const argv = spawnableArgv(found)
+
+    if (argv.length === 0) {
+      return Response.json(
+        { type: 'done', ok: false, message: 'The CLI is not installed yet.' } satisfies SetupEvent,
+        { status: 412 },
+      )
+    }
+
+    const loginArgv = [...argv, ...info.loginArgs]
+
+    // The RESOLVED command, never `loginCommand`. This is the message that tells the user to
+    // go type it themselves, so handing them the pretty bare name would reproduce the original
+    // failure by hand — for a managed install it is the one command guaranteed not to work.
+    command = displayCommand(loginArgv)
+
+    if (!(await openInTerminal(loginArgv))) {
       return Response.json({
         type: 'done',
         ok: false,
@@ -192,74 +197,9 @@ export async function handleLogin(req: Request): Promise<Response> {
     return Response.json({
       type: 'done',
       ok: false,
-      message: `Couldn’t start sign-in. Run \`${command}\` yourself, then press Retry.`,
+      message: command
+        ? `Couldn’t start sign-in. Run \`${command}\` yourself, then press Retry.`
+        : `Couldn’t start sign-in. Check that ${info.label} runs in a terminal, then press Retry.`,
     } satisfies SetupEvent)
   }
-}
-
-/**
- * Wrap one argv element for a POSIX shell.
- *
- * Single quotes rather than escaping, because inside them every character except `'` is
- * literal — no expansion, no globbing, no `$`. The discovered path is not user input, but it
- * routinely contains spaces (`~/Library/Application Support/…`).
- */
-const shQuote = (s: string) => `'${s.replaceAll("'", `'\\''`)}'`
-
-/**
- * Launch an argv in whatever terminal this OS has. Returns false if none worked.
- *
- * Takes argv rather than a command string, and that is the whole trick on Windows. The obvious
- * version — join the parts, quote the path, hand cmd one string — cannot work: Bun escapes the
- * inner quotes backslash-style on the way to CreateProcess, cmd.exe does not treat `\"` as an
- * escape, and the window opens on a mangled path it says is not recognized. Passing the parts
- * as separate arguments lets Bun quote each one on its own, which is the form cmd does parse.
- */
-function spawnInTerminal(argv: string[]): boolean {
-  // cwd matters only cosmetically here — the login flow writes to ~/.codex, not to the working
-  // directory — but a terminal that opens in System32 (where a GUI-launched app often starts)
-  // reads like something went wrong. config.cwd is the same user-owned directory sessions run in.
-  const opts = { stdout: 'ignore', stderr: 'ignore', env: childEnv(), cwd: config.cwd } as const
-
-  if (process.platform === 'win32') {
-    // `start` is a cmd builtin, so it needs cmd. The empty "" is the window TITLE argument —
-    // without it, `start` treats a quoted command as the title and opens an empty shell.
-    // `/k` keeps the window open afterwards so the user can read the result.
-    Bun.spawn(['cmd.exe', '/c', 'start', '""', 'cmd.exe', '/k', ...argv], opts)
-    return true
-  }
-
-  const command = argv.map(shQuote).join(' ')
-
-  if (process.platform === 'darwin') {
-    // Two escaping layers, not one: `command` is already shell-safe, and this embeds it in an
-    // AppleScript string literal, where `\` and `"` are the two characters that would end it.
-    const script = command.replaceAll('\\', '\\\\').replaceAll('"', '\\"')
-    Bun.spawn(['osascript', '-e', `tell application "Terminal" to do script "${script}"`], opts)
-    Bun.spawn(['osascript', '-e', 'tell application "Terminal" to activate'], opts)
-    return true
-  }
-
-  // Linux has no single answer; try the usual suspects in order of how likely they are to be
-  // the session's actual terminal.
-  for (const term of [
-    'x-terminal-emulator',
-    'gnome-terminal',
-    'konsole',
-    'xfce4-terminal',
-    'xterm',
-  ]) {
-    if (!Bun.which(term)) continue
-    // `exec bash` keeps the window open after the flow finishes, matching /k on Windows.
-    const payload = `${command}; exec bash`
-    const args =
-      term === 'gnome-terminal'
-        ? ['--', 'bash', '-lc', payload]
-        : // `-e` takes ONE string that the terminal re-splits, so this quotes a second time.
-          ['-e', `bash -lc ${shQuote(payload)}`]
-    Bun.spawn([term, ...args], opts)
-    return true
-  }
-
-  return false
 }

@@ -1,5 +1,6 @@
 import type {
   AppEvent,
+  AppState,
   AuthResponse,
   ChatRequest,
   ProviderId,
@@ -29,6 +30,24 @@ export async function fetchAuth(provider: ProviderId, signal?: AbortSignal): Pro
   return (await res.json()) as AuthResponse
 }
 
+/**
+ * Clear the app state the agent wrote, server-side.
+ *
+ * The panel is cleared locally first, so this is only about the copy the SERVER holds: the
+ * one a reload re-seeds from and the one `get_app_state` reads. Without it a new conversation
+ * starts with the previous one's status still on screen.
+ */
+export async function resetAppState(): Promise<AppState> {
+  let res: Response
+  try {
+    res = await fetch('/api/state', { method: 'DELETE' })
+  } catch {
+    throw new ApiError('network', 0)
+  }
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
+  return (await res.json()) as AppState
+}
+
 /** Ask the server to start the vendor's sign-in flow. Resolves once it has been launched. */
 export async function startLogin(provider: ProviderId): Promise<SetupEvent> {
   let res: Response
@@ -41,7 +60,15 @@ export async function startLogin(provider: ProviderId): Promise<SetupEvent> {
   } catch {
     throw new ApiError('network', 0)
   }
-  return (await res.json()) as SetupEvent
+  // Deliberately NOT `if (!res.ok) throw`: the 412 carries a message written for this exact
+  // user ("The CLI is not installed yet"), and discarding it would replace real copy with a
+  // generic failure. A body that is not JSON — a proxy page, an unhandled 500 — has nothing
+  // worth showing, so that is the case that throws.
+  try {
+    return (await res.json()) as SetupEvent
+  } catch {
+    throw new ApiError(`HTTP ${res.status}`, res.status)
+  }
 }
 
 /**

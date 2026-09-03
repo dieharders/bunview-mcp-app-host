@@ -5,6 +5,7 @@
  * defaults are chosen to be the *safe* end of each axis, and widening any of them is a
  * single deliberate edit rather than a change spread across five call sites.
  */
+import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 
 const str = (key: string): string | undefined => {
@@ -15,6 +16,16 @@ const str = (key: string): string | undefined => {
 const num = (key: string, fallback: number): number => {
   const v = Number(process.env[key])
   return Number.isFinite(v) && v > 0 ? v : fallback
+}
+
+/** A directory that is actually there, or undefined — noisily, since the user asked for it. */
+const existingDir = (dir: string | undefined): string | undefined => {
+  if (!dir) return undefined
+  if (existsSync(dir)) return dir
+  console.warn(
+    `✗ BUNVIEW_CWD is not a directory that exists: ${dir}\n  Falling back to the home directory.`,
+  )
+  return undefined
 }
 
 const bool = (key: string, fallback: boolean): boolean => {
@@ -46,9 +57,9 @@ const permissionMode = str('BUNVIEW_PERMISSION_MODE') ?? 'default'
 
 if (permissionMode === 'bypassPermissions' && !bool('BUNVIEW_ALLOW_BYPASS', false)) {
   // Refuse rather than warn. `bypassPermissions` disables every permission check, and a
-  // scaffold that quietly honours it hands the footgun to whoever forks this next. The
-  // `--restricted` flag we pass would reject it independently, but failing here makes the
-  // refusal legible instead of mysterious.
+  // scaffold that quietly honours it hands the footgun to whoever forks this next. This is
+  // now the ONLY thing standing in its way — an earlier version also passed `--restricted`,
+  // which the CLI turned out not to have (see claude-options.ts) — so it fails loudly here.
   console.error(
     '✗ BUNVIEW_PERMISSION_MODE=bypassPermissions requires BUNVIEW_ALLOW_BYPASS=1.\n' +
       '  This disables all permission checks. Set both only if you mean it.',
@@ -75,10 +86,15 @@ export const config = {
    *
    * homedir(), not process.cwd(): a compiled binary launched from a Desktop shortcut gets
    * the Desktop as cwd, and from some shell contexts it gets System32. cwd decides which
-   * project bucket the session's transcript lands in AND which directory `--restricted`
-   * confines the file tools to, so it needs to be somewhere stable and user-owned.
+   * project bucket the session's transcript lands in AND the only directory the file tools
+   * can reach, so it needs to be somewhere stable and user-owned.
+   *
+   * Checked for existence rather than trusted: this value is handed to `Bun.spawn`, which
+   * throws on a working directory that is not there. A stale BUNVIEW_CWD (a typo, an unmounted
+   * drive) would otherwise take out the sign-in flow — the one path a user reaches for when
+   * something is already wrong.
    */
-  cwd: str('BUNVIEW_CWD') ?? homedir(),
+  cwd: existingDir(str('BUNVIEW_CWD')) ?? homedir(),
 
   /** Default model when the request does not name one. Undefined = the CLI's own default. */
   model: str('BUNVIEW_MODEL'),

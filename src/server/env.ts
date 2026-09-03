@@ -11,7 +11,13 @@
  * running on their subscription — with no visible symptom until the invoice.
  *
  * Set `BUNVIEW_ALLOW_API_KEY=1` to opt back in deliberately.
+ *
+ * Stripping covers every CLI this app spawns — chat turns and status probes alike — so what
+ * it runs is never billed to a key. The one place it cannot reach is the sign-in TERMINAL,
+ * which is the user's own login shell by design; `hadApiKeyOverride` exists so the UI can say
+ * so rather than pretend otherwise. See `terminal.ts`.
  */
+import type { ProviderId } from '../shared/events'
 
 /** Variables that would redirect auth away from the subscription credential. */
 const OVERRIDES = [
@@ -35,7 +41,13 @@ export function childEnv(): Record<string, string | undefined> {
   return env
 }
 
-/** True when the environment would have redirected billing away from the subscription. */
-export function hadApiKeyOverride(): boolean {
+/**
+ * True when the environment would have redirected billing away from the subscription.
+ *
+ * Takes the provider because every variable in OVERRIDES is one of Anthropic's — none of them
+ * changes what Codex does, so reporting one to a Codex user would be a warning about nothing.
+ */
+export function hadApiKeyOverride(provider: ProviderId): boolean {
+  if (provider !== 'claude') return false
   return OVERRIDES.some((k) => Boolean(process.env[k]))
 }

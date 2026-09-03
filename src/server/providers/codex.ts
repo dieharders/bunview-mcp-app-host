@@ -33,32 +33,28 @@
  * schema should degrade to "no event" rather than to a crash.
  */
 import type { AppEvent } from '../../shared/events'
-import { ERROR_COPY } from '../../shared/events'
+import { errorCopy } from '../../shared/events'
 import { config } from '../config'
 import { childEnv } from '../env'
-import { CODEX_SPEC, discoverCli } from './discovery'
+import { CODEX_SPEC, discoverCli, isInstalled } from './discovery'
 import { readLines } from './ndjson'
 import { track, untrack } from '../proc'
-import type { Provider, ProviderAuth, ProviderDetection, StreamOptions } from './types'
+import type { Provider, ProviderAuth, StreamOptions } from './types'
+
+/** Every message in this file is about Codex, so the provider is never in question. */
+const copy = (code: Parameters<typeof errorCopy>[0]) => errorCopy(code, 'codex')
 
 const AUTH_TIMEOUT_MS = 15_000
 const STDERR_TAIL_BYTES = 4096
 
 const discover = () => discoverCli(CODEX_SPEC, config.codexPath)
 
-async function detect(): Promise<ProviderDetection> {
-  const found = await discover()
-  return {
-    argv: found.argv,
-    path: found.path,
-    searched: found.searched,
-    unresolvedShim: found.unresolvedShim,
-  }
-}
+// `discover` already satisfies ProviderDetection; see the same note in claude.ts.
+const detect = discover
 
 async function authStatus(): Promise<ProviderAuth> {
   const found = await discover()
-  if (found.argv.length === 0) {
+  if (!isInstalled(found)) {
     return { state: 'cli_missing', plan: null, account: null, subscription: false }
   }
 
@@ -151,7 +147,7 @@ function mapCodexLine(raw: string, state: { sessionId: string | null }): AppEven
   }
 
   if (msg.type === 'turn.failed' || msg.type === 'error') {
-    return [{ type: 'error', code: 'cli_failed', message: ERROR_COPY.cli_failed }]
+    return [{ type: 'error', code: 'cli_failed', message: copy('cli_failed') }]
   }
 
   return []
@@ -166,8 +162,8 @@ const TOOL_LABELS: Record<string, string> = {
 
 async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator<AppEvent> {
   const found = await discover()
-  if (found.argv.length === 0) {
-    yield { type: 'error', code: 'cli_missing', message: ERROR_COPY.cli_missing }
+  if (!isInstalled(found)) {
+    yield { type: 'error', code: 'cli_missing', message: copy('cli_missing') }
     return
   }
 
@@ -232,16 +228,16 @@ async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator
 
     const code = await proc.exited
     if (reason === 'aborted') {
-      yield { type: 'error', code: 'aborted', message: ERROR_COPY.aborted }
+      yield { type: 'error', code: 'aborted', message: copy('aborted') }
     } else if (reason === 'timeout') {
-      yield { type: 'error', code: 'timeout', message: ERROR_COPY.timeout }
+      yield { type: 'error', code: 'timeout', message: copy('timeout') }
     } else if (code !== 0) {
       await drainErr
       console.error(`[codex] exit ${code}\n${stderrTail}`)
       const notAuthed = /not (logged in|authenticated)|codex login/i.test(stderrTail)
       yield notAuthed
-        ? { type: 'error', code: 'not_authenticated', message: ERROR_COPY.not_authenticated }
-        : { type: 'error', code: 'cli_failed', message: ERROR_COPY.cli_failed }
+        ? { type: 'error', code: 'not_authenticated', message: copy('not_authenticated') }
+        : { type: 'error', code: 'cli_failed', message: copy('cli_failed') }
     }
   } finally {
     clearTimeout(wallTimer)

@@ -3,15 +3,18 @@
  */
 import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { AppEvent } from '../../shared/events'
-import { ERROR_COPY } from '../../shared/events'
+import { errorCopy } from '../../shared/events'
 import { config } from '../config'
 import { childEnv } from '../env'
 import { getState, getVersion } from '../state'
 import { buildOptions } from './claude-options'
-import { CLAUDE_SPEC, discoverCli } from './discovery'
+import { CLAUDE_SPEC, discoverCli, isInstalled } from './discovery'
 import { mapMessage, type MapState } from './claude-map'
 import { track, untrack } from '../proc'
-import type { Provider, ProviderAuth, ProviderDetection, StreamOptions } from './types'
+import type { Provider, ProviderAuth, StreamOptions } from './types'
+
+/** Every message in this file is about Claude, so the provider is never in question. */
+const copy = (code: Parameters<typeof errorCopy>[0]) => errorCopy(code, 'claude')
 
 const discover = () => discoverCli(CLAUDE_SPEC, config.claudePath)
 
@@ -19,15 +22,10 @@ const AUTH_TIMEOUT_MS = 15_000
 /** Keep the tail, not the transcript: a wedged process can produce a lot of stderr. */
 const STDERR_TAIL_BYTES = 4096
 
-async function detect(): Promise<ProviderDetection> {
-  const found = await discover()
-  return {
-    argv: found.argv,
-    path: found.path,
-    searched: found.searched,
-    unresolvedShim: found.unresolvedShim,
-  }
-}
+// `discover` already satisfies ProviderDetection, so there is no mapping step. The hand-copy
+// that used to sit here is what dropped `argv` when the field was added — it typechecked,
+// because a field-by-field copy of a wider type is exactly what TypeScript cannot warn about.
+const detect = discover
 
 /** Shape of `claude auth status --json`. Narrowed field by field below — never spread. */
 interface AuthStatusJson {
@@ -40,12 +38,15 @@ interface AuthStatusJson {
 
 async function authStatus(): Promise<ProviderAuth> {
   const found = await discover()
-  if (!found.path) {
+  if (!isInstalled(found)) {
     return { state: 'cli_missing', plan: null, account: null, subscription: false }
   }
 
   try {
-    const proc = Bun.spawn([found.path, 'auth', 'status', '--json'], {
+    // ARGV, not `path`. A Node-launcher entry point is `[node, cli.js]`, and spawning the
+    // `.js` alone execs a script as an image — which reported the badge as "unknown" while
+    // sign-in, which already read argv, worked fine.
+    const proc = Bun.spawn([...found.argv, 'auth', 'status', '--json'], {
       // Same environment as the chat turn. If these differed, the badge could report "Max"
       // while every message was actually billed to an API key.
       env: childEnv(),
@@ -81,8 +82,10 @@ async function authStatus(): Promise<ProviderAuth> {
 
 async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator<AppEvent> {
   const found = await discover()
-  if (!found.path) {
-    yield { type: 'error', code: 'cli_missing', message: ERROR_COPY.cli_missing }
+  // Both conditions: `argv` is the installed test, and `path` is what the SDK wants further
+  // down — `pathToClaudeCodeExecutable` takes one string and there is no argv form of it.
+  if (!isInstalled(found) || !found.path) {
+    yield { type: 'error', code: 'cli_missing', message: copy('cli_missing') }
     return
   }
 
@@ -137,18 +140,18 @@ async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator
     }
 
     if (reason === 'aborted') {
-      yield { type: 'error', code: 'aborted', message: ERROR_COPY.aborted }
+      yield { type: 'error', code: 'aborted', message: copy('aborted') }
     } else if (reason === 'timeout') {
-      yield { type: 'error', code: 'timeout', message: ERROR_COPY.timeout }
+      yield { type: 'error', code: 'timeout', message: copy('timeout') }
     }
   } catch (err) {
     // An abort surfaces here as a thrown error rather than a clean end of iteration.
     if (reason === 'aborted') {
-      yield { type: 'error', code: 'aborted', message: ERROR_COPY.aborted }
+      yield { type: 'error', code: 'aborted', message: copy('aborted') }
       return
     }
     if (reason === 'timeout') {
-      yield { type: 'error', code: 'timeout', message: ERROR_COPY.timeout }
+      yield { type: 'error', code: 'timeout', message: copy('timeout') }
       return
     }
 
@@ -159,8 +162,8 @@ async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator
       stderrTail + String(err),
     )
     yield notAuthed
-      ? { type: 'error', code: 'not_authenticated', message: ERROR_COPY.not_authenticated }
-      : { type: 'error', code: 'cli_failed', message: ERROR_COPY.cli_failed }
+      ? { type: 'error', code: 'not_authenticated', message: copy('not_authenticated') }
+      : { type: 'error', code: 'cli_failed', message: copy('cli_failed') }
   } finally {
     // Runs on the normal path AND when the consumer abandons the `for await` — an abandoned
     // async generator has .return() called on it, which executes this block. That generator

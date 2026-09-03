@@ -208,6 +208,15 @@ async function makeMacApp(binaryPath: string, appDir: string) {
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>NSHighResolutionCapable</key><true/>
+  <!-- REQUIRED for sign-in to work at all. Opening a terminal on macOS drives Terminal.app
+       through an Apple Event, and since 10.14 an app without this key is refused with
+       errAEEventNotPermitted (-1743) and NO consent prompt: osascript exits non-zero, no
+       window appears, and the app has no way to tell. The string is what the user reads in
+       the permission dialog, so it says which app and why.
+       Note this only bites the shipped bundle — run from a terminal in development, the
+       TERMINAL is the responsible process and it already holds the permission, which is why
+       this was invisible for so long. -->
+  <key>NSAppleEventsUsageDescription</key><string>${DISPLAY_NAME} opens a Terminal window so you can sign in to your CLI.</string>
 </dict>
 </plist>`,
   )

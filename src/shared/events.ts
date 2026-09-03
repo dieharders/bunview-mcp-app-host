@@ -42,14 +42,27 @@ export type AppErrorCode =
  * The agent's own error prose NEVER reaches the DOM: it is written for a terminal, mentions
  * paths and flags that mean nothing here, and is not a string we control the stability of.
  * The cause goes to the server log; one of these goes to the user.
+ *
+ * Takes the provider because three of these name a product and one names a command. As a flat
+ * record they were hardcoded Claude prose that the Codex provider yielded verbatim, so a user
+ * signed out of ChatGPT was told to run `claude auth login`.
  */
-export const ERROR_COPY: Record<AppErrorCode, string> = {
-  cli_missing: 'Claude Code isn’t installed, or BunView can’t find it.',
-  not_authenticated: 'Claude Code isn’t signed in. Run `claude auth login` in a terminal.',
-  cli_failed: 'Claude Code couldn’t finish that request. Check the app log and try again.',
-  aborted: 'Stopped.',
-  timeout: 'That took too long and was stopped.',
-  bad_request: 'That message couldn’t be sent.',
+export function errorCopy(code: AppErrorCode, provider: ProviderId): string {
+  const { label } = PROVIDERS[provider]
+  switch (code) {
+    case 'cli_missing':
+      return `${label} isn’t installed, or BunView can’t find it.`
+    case 'not_authenticated':
+      return `${label} isn’t signed in. Run \`${loginCommand(provider)}\` in a terminal.`
+    case 'cli_failed':
+      return `${label} couldn’t finish that request. Check the app log and try again.`
+    case 'aborted':
+      return 'Stopped.'
+    case 'timeout':
+      return 'That took too long and was stopped.'
+    case 'bad_request':
+      return 'That message couldn’t be sent.'
+  }
 }
 
 /** Model choices offered in the composer. Aliases resolve to the latest of each family. */
@@ -87,15 +100,14 @@ export interface ProviderInfo {
   vendor: string
   /** npm package that provides the CLI. Kept for discovery's path layout, not for installing. */
   npmPackage: string
-  /** Command the user would type to sign in. DISPLAY ONLY — see `loginArgs`. */
-  loginCommand: string
   /**
    * The sign-in subcommand, minus the binary name.
    *
-   * Split out because the binary this app found is very often NOT the bare name in
-   * `loginCommand`: a managed install lives in the app's data directory, deliberately off
-   * PATH, so handing `codex login` to a terminal produces "'codex' is not recognized". The
-   * terminal gets the discovered argv plus these; the user gets the readable string above.
+   * Minus the binary name because the binary this app found is very often NOT the bare one: a
+   * managed install lives in the app's data directory, deliberately off PATH, so handing
+   * `codex login` to a terminal produces "'codex' is not recognized". What gets spawned is the
+   * DISCOVERED argv plus these. `loginCommand()` rebuilds the readable form for prose, and is
+   * derived rather than stored so the two cannot drift.
    */
   loginArgs: string[]
   /**
@@ -115,7 +127,6 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     vendor: 'Anthropic',
     plan: 'Claude Pro or Max',
     npmPackage: '@anthropic-ai/claude-code',
-    loginCommand: 'claude auth login',
     loginArgs: ['auth', 'login'],
     appTools: true,
     caveat: '',
@@ -126,7 +137,6 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     vendor: 'OpenAI',
     plan: 'ChatGPT Plus, Pro or Business',
     npmPackage: '@openai/codex',
-    loginCommand: 'codex login',
     loginArgs: ['login'],
     appTools: false,
     // Stated in the picker rather than discovered later. Note what this does NOT say: Codex's
@@ -135,6 +145,18 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     caveat: '', // Replies arrive by message instead of token.
   },
 }
+
+/**
+ * The sign-in command as a human would type it, for prose only.
+ *
+ * DERIVED, never stored. As a second field beside `loginArgs` nothing kept the two in step,
+ * and the drift is invisible: a vendor renaming its subcommand leaves the app spawning one
+ * thing and advising another. The binary name is the provider id for both vendors, which is
+ * also exactly `CliSpec.binary` in the server's discovery.
+ *
+ * NOT what gets spawned — see `loginArgs`.
+ */
+export const loginCommand = (id: ProviderId): string => [id, ...PROVIDERS[id].loginArgs].join(' ')
 
 export const DEFAULT_PROVIDER: ProviderId = 'claude'
 
@@ -146,19 +168,39 @@ export interface ChatRequest {
   effort: EffortChoice
 }
 
+/**
+ * Carried by every auth shape, not only the signed-in one.
+ *
+ * True when the environment holds a variable that would point the CLI at metered API billing
+ * instead of the user's plan — `ANTHROPIC_API_KEY` and the Bedrock/Vertex switches.
+ *
+ * This app strips those from every CLI it spawns, so nothing it runs is ever billed to a key.
+ * The sign-in TERMINAL is the one exception, and unavoidably so: it is the user's own login
+ * shell, which re-reads their profile after we hand it the command. A login started there can
+ * therefore no-op as "already authenticated" against the key while this app, reading status
+ * with the key stripped, still reports signed-out — a Retry loop with no visible cause.
+ *
+ * Telling the user is the only fix that does not involve dictating their shell environment.
+ */
+interface EnvOverride {
+  apiKeyOverride: boolean
+}
+
 /** Shape of `GET /api/auth`. Mirrors the provider's auth report, narrowed for the browser. */
-export type AuthResponse =
-  | { state: 'ok'; account: string | null; plan: string | null; subscription: boolean }
-  | { state: 'logged_out' }
-  | {
-      state: 'cli_missing'
-      searched: string[]
-      unresolvedShim: string | null
-      /** Whether to offer an Install button. Decided on the server, whose preconditions
-       *  (and BUNVIEW_ALLOW_INSTALL) the browser cannot see. */
-      canInstall: boolean
-    }
-  | { state: 'unknown' }
+export type AuthResponse = EnvOverride &
+  (
+    | { state: 'ok'; account: string | null; plan: string | null; subscription: boolean }
+    | { state: 'logged_out' }
+    | {
+        state: 'cli_missing'
+        searched: string[]
+        unresolvedShim: string | null
+        /** Whether to offer an Install button. Decided on the server, whose preconditions
+         *  (and BUNVIEW_ALLOW_INSTALL) the browser cannot see. */
+        canInstall: boolean
+      }
+    | { state: 'unknown' }
+  )
 
 /**
  * Progress from a setup action that changes the user's machine (installing a CLI) or opens an

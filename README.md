@@ -167,7 +167,7 @@ Read-only.
 | `BUNVIEW_DISALLOWED_TOOLS`             | `Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch` | The actual fence                                                   |
 | `BUNVIEW_PERMISSION_MODE`              | `default`                                         | `bypassPermissions` additionally requires `BUNVIEW_ALLOW_BYPASS=1` |
 | `BUNVIEW_SETTING_SOURCES`              | _(empty)_                                         | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers  |
-| `BUNVIEW_CWD`                          | `homedir()`                                       | Session bucket, and what `--restricted` confines file tools to     |
+| `BUNVIEW_CWD`                          | `homedir()`                                       | Session bucket, and the only directory the file tools can reach    |
 | `BUNVIEW_MODEL`                        | _(CLI default)_                                   | Also selectable per-message in the UI                              |
 | `BUNVIEW_EFFORT`                       | `low`                                             | Session-scoped; never written to your config                       |
 | `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                                    | Explicit path to the Claude binary                                 |
@@ -180,7 +180,7 @@ Read-only.
 Two things are worth knowing about the defaults:
 
 - **`settingSources: []` is not tidiness.** With the default, the session inherits every MCP server in the user's `~/.claude.json`. On a working developer machine that can mean Gmail, Drive and Calendar.
-- **`--restricted` is passed as a hard backstop.** It removes the tools that run commands or code, confines file tools to the working directories, ignores user/project/local settings, and _refuses `bypassPermissions` outright_ — so an app built on this cannot cause harm.
+- **The fence is built from typed SDK options, not a raw CLI flag.** `disallowedTools` plus a deny-by-default `canUseTool` removes the tools that run commands or code; the CLI confines file tools to `cwd` unless something passes `--add-dir`, which nothing here does; `settingSources: []` ignores user/project/local settings; and `bypassPermissions` is refused at startup unless `BUNVIEW_ALLOW_BYPASS=1` is set alongside it. An earlier version also passed `--restricted`, which this CLI does not have — an unknown flag is fatal, so it broke every turn. Prefer typed options over `extraArgs`: that is unchecked passthrough to a binary this app does not version-pin.
 
 **Never add `--bare`.** otherwise the sdk will use `ANTHROPIC_API_KEY` and bill based on API usage instead.
 
@@ -194,7 +194,7 @@ BUNVIEW_CWD="/path/to/project" \
 bun run dev
 ```
 
-`--restricted` then confines those file tools to that directory automatically.
+The file tools are then confined to that directory — the CLI scopes them to `cwd`, and nothing here passes `--add-dir` to widen it.
 
 ## Architecture notes
 

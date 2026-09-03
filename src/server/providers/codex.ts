@@ -48,7 +48,12 @@ const discover = () => discoverCli(CODEX_SPEC, config.codexPath)
 
 async function detect(): Promise<ProviderDetection> {
   const found = await discover()
-  return { path: found.path, searched: found.searched, unresolvedShim: found.unresolvedShim }
+  return {
+    argv: found.argv,
+    path: found.path,
+    searched: found.searched,
+    unresolvedShim: found.unresolvedShim,
+  }
 }
 
 async function authStatus(): Promise<ProviderAuth> {

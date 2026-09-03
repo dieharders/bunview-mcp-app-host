@@ -87,8 +87,17 @@ export interface ProviderInfo {
   vendor: string
   /** npm package that provides the CLI. Kept for discovery's path layout, not for installing. */
   npmPackage: string
-  /** Command the user would type to sign in, shown in the setup banner. */
+  /** Command the user would type to sign in. DISPLAY ONLY — see `loginArgs`. */
   loginCommand: string
+  /**
+   * The sign-in subcommand, minus the binary name.
+   *
+   * Split out because the binary this app found is very often NOT the bare name in
+   * `loginCommand`: a managed install lives in the app's data directory, deliberately off
+   * PATH, so handing `codex login` to a terminal produces "'codex' is not recognized". The
+   * terminal gets the discovered argv plus these; the user gets the readable string above.
+   */
+  loginArgs: string[]
   /**
    * Whether this app's OWN tools reach the agent. False means the starter prompts that
    * demonstrate them are hidden, because suggesting a tool the agent cannot call is worse
@@ -107,6 +116,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     plan: 'Claude Pro or Max',
     npmPackage: '@anthropic-ai/claude-code',
     loginCommand: 'claude auth login',
+    loginArgs: ['auth', 'login'],
     appTools: true,
     caveat: '',
   },
@@ -117,6 +127,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     plan: 'ChatGPT Plus, Pro or Business',
     npmPackage: '@openai/codex',
     loginCommand: 'codex login',
+    loginArgs: ['login'],
     appTools: false,
     // Stated in the picker rather than discovered later. Note what this does NOT say: Codex's
     // OWN tools — shell, file edits, web search, any MCP server the user has configured — work

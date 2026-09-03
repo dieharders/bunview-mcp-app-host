@@ -21,7 +21,12 @@ const STDERR_TAIL_BYTES = 4096
 
 async function detect(): Promise<ProviderDetection> {
   const found = await discover()
-  return { path: found.path, searched: found.searched, unresolvedShim: found.unresolvedShim }
+  return {
+    argv: found.argv,
+    path: found.path,
+    searched: found.searched,
+    unresolvedShim: found.unresolvedShim,
+  }
 }
 
 /** Shape of `claude auth status --json`. Narrowed field by field below — never spread. */

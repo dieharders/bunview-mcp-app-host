@@ -36,6 +36,18 @@ export interface CliSpec {
   /** Path segments from the package root to the real entry point. */
   packageBin: string[]
   /**
+   * Per-platform npm packages that ship the real binary inside the package itself, and the
+   * file to look for within one. Empty for a vendor that publishes no such package.
+   *
+   * This is the Agent SDK's own delivery mechanism: `@anthropic-ai/claude-agent-sdk` declares
+   * `@anthropic-ai/claude-agent-sdk-<platform>-<arch>` as optional dependencies, and npm
+   * installs exactly the one that matches. So in dev there is already a version-matched
+   * `claude.exe` sitting in node_modules — no shim, no PATH, no download.
+   */
+  bundledPackages?: string[]
+  bundledBin?: string
+
+  /**
    * Where this app would put its own managed copy.
    *
    * Checked LAST, on purpose: a CLI the user installed themselves stays authoritative. Two
@@ -43,6 +55,35 @@ export interface CliSpec {
    * ours over one they already configured is how a working setup starts behaving oddly.
    */
   managedPath?: string
+}
+
+/**
+ * The binary the Agent SDK shipped for this exact platform, if it is on disk.
+ *
+ * Worth a rung of its own for two reasons. It is version-matched to the SDK doing the driving,
+ * which the user's own `claude` is not. And it is a real PE/Mach-O image at a known path,
+ * which sidesteps the entire npm-shim problem in the header above — in dev, the case that
+ * produces `spawn ...\nodejs\claude ENOENT` never arises, because this is found first.
+ *
+ * Resolution is deliberately allowed to fail silently: inside a `bun build --compile`
+ * executable there is no node_modules to resolve against, and that is the normal case for a
+ * shipped build rather than an error. It falls through to the rungs below.
+ */
+function bundledCandidates(spec: CliSpec): string[] {
+  if (!spec.bundledPackages?.length || !spec.bundledBin) return []
+
+  const out: string[] = []
+  for (const pkg of spec.bundledPackages) {
+    try {
+      // Resolve the package.json rather than the package root: a package with no `main` (which
+      // these are — they ship a binary, not JS) does not resolve by bare name.
+      const manifest = Bun.resolveSync(`${pkg}/package.json`, import.meta.dir)
+      out.push(join(dirname(manifest), spec.bundledBin))
+    } catch {
+      // Not installed for this platform, or no node_modules at all. Both are expected.
+    }
+  }
+  return out
 }
 
 /**
@@ -242,8 +283,11 @@ async function runDiscovery(spec: CliSpec, override?: string): Promise<Discovery
   }
 
   // 3. Well-known locations, for the GUI-launch case.
-  // 4. Then this app's own managed copy — last, so a user's install always wins.
-  const rungs = [...candidates(spec)]
+  // 4. Then the binary the SDK shipped for this platform — after the user's own install, so
+  //    theirs stays authoritative, but before our downloaded copy, because it is version-
+  //    matched to the SDK that will drive it.
+  // 5. Then this app's own managed copy, last.
+  const rungs = [...candidates(spec), ...bundledCandidates(spec)]
   if (spec.managedPath) rungs.push(spec.managedPath)
 
   for (const candidate of rungs) {
@@ -260,6 +304,17 @@ export const CLAUDE_SPEC: CliSpec = {
   binary: 'claude',
   npmPackage: '@anthropic-ai/claude-code',
   packageBin: ['bin', IS_WIN ? 'claude.exe' : 'claude'],
+  // Both libc flavours are listed for Linux because `process.platform` is 'linux' either way
+  // and nothing in this process can tell glibc from musl. Only one will ever be installed, so
+  // trying both costs a failed resolve rather than a wrong answer.
+  bundledPackages:
+    process.platform === 'linux'
+      ? [
+          `@anthropic-ai/claude-agent-sdk-linux-${process.arch}`,
+          `@anthropic-ai/claude-agent-sdk-linux-${process.arch}-musl`,
+        ]
+      : [`@anthropic-ai/claude-agent-sdk-${process.platform}-${process.arch}`],
+  bundledBin: IS_WIN ? 'claude.exe' : 'claude',
   managedPath: managedBinaryPath('claude'),
 }
 

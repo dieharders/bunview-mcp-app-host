@@ -42,10 +42,22 @@ export function buildOptions(
     // never writes to their config. Defaults to 'low' upstream in the request parser.
     effort: opts.effort,
 
-    // Read-only. `allowedTools` pre-approves so that no permission prompt can arise in a
-    // headless session that has no terminal to show one on; `disallowedTools` is the fence.
+    // THE FENCE. `tools` is the base set of built-in tools that exist at all for this
+    // session; anything not named here cannot be called, cannot be prompted for, and cannot
+    // be added by a future CLI release. It replaced a `disallowedTools` denylist, which had
+    // the inverse and much worse property — a new built-in tool was permitted until someone
+    // noticed and added it to the list. The SDK's own docs point here: "To restrict which
+    // tools are available, use the `tools` option instead."
+    //
+    // This governs BUILT-IN tools only; `mcpServers` below is a separate surface, so the
+    // app's own tools survive even at `tools: []`.
+    tools: config.tools,
+
+    // Pre-approval, NOT restriction. Everything in `tools` is named here too, so a headless
+    // session with no terminal to show a prompt on never has to show one.
     allowedTools: config.allowedTools,
-    disallowedTools: config.disallowedTools,
+
+    // `dontAsk`: deny anything not pre-approved rather than prompting into the void.
     permissionMode: config.permissionMode as Options['permissionMode'],
 
     // The app's own tools, running in this process. See ../mcp/app-tools.ts.
@@ -74,8 +86,9 @@ export function buildOptions(
     // Each guarantee it was carrying is covered by the typed options above, which the SDK
     // translates into whatever the installed CLI actually accepts:
     //
-    //   * no tools that run commands or code → `disallowedTools`, plus `canUseTool` below
-    //     denying everything that is not ours
+    //   * no tools that run commands or code → `tools`, which is an allowlist: Bash, Write
+    //     and Edit are not denied, they are absent. Plus `canUseTool` below for anything that
+    //     reaches the permission flow anyway
     //   * file tools confined to the workspace → the CLI already confines them to `cwd`;
     //     widening it requires an explicit `--add-dir`, which nothing here passes
     //   * user, project and local settings ignored → `settingSources: []`
@@ -90,9 +103,9 @@ export function buildOptions(
     // apiKeyHelper … OAuth and keychain are never read" — the exact negation of running on
     // the user's subscription.
 
-    // Reached only when the permission flow falls through to a prompt, which the allow/deny
-    // lists above are arranged to prevent. It is the backstop, and it is where an app that
-    // wants inline approve/deny UI would post the request to the browser and await the
+    // Reached only when the permission flow falls through to a prompt, which `tools` and
+    // `allowedTools` above are arranged to prevent. It is the backstop, and it is where an app
+    // that wants inline approve/deny UI would post the request to the browser and await the
     // answer — the `signal` argument is there so that await can be cancelled.
     //
     // NOT consulted for anything named in `allowedTools`. A bare entry there auto-approves
@@ -103,8 +116,9 @@ export function buildOptions(
     // Gating every call instead would mean a PreToolUse hook, or dropping the bare names and
     // accepting that a prompt can arise in a session with no terminal to show it on.
     //
-    // Fail closed for everything else: a tool added by a future CLI release is refused rather
-    // than silently allowed.
+    // Fail closed for everything else. Note this is now the SECOND line of defence rather than
+    // the only one: a tool added by a future CLI release is no longer merely refused here, it
+    // is absent from the session because `tools` above never named it.
     // `updatedInput` echoes the original input deliberately: the field REPLACES the tool's
     // arguments when present, so passing `{}` here would approve every call and then strip
     // everything the model asked for.

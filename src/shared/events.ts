@@ -169,21 +169,41 @@ export interface ChatRequest {
 }
 
 /**
+ * How the app treats credentials that would redirect billing away from the user's plan.
+ *
+ * `auto`         — the CLI gets the environment as it is, and applies its own precedence,
+ *                  which prefers an API key when one is present. "Claude Code as published."
+ * `subscription` — the app strips those variables from the CLIs it spawns, so the plan is
+ *                  billed.
+ *
+ * The default is `auto` and the switch is the USER'S. An app that hosts the vendor's binary
+ * may not remove an authentication method built into it, and stripping the key unconditionally
+ * is that — so the protection is one click away in the header rather than a silent default.
+ */
+export const CREDENTIAL_MODES = ['auto', 'subscription'] as const
+export type CredentialMode = (typeof CREDENTIAL_MODES)[number]
+
+/**
  * Carried by every auth shape, not only the signed-in one.
  *
- * True when the environment holds a variable that would point the CLI at metered API billing
- * instead of the user's plan — `ANTHROPIC_API_KEY` and the Bedrock/Vertex switches.
+ * `apiKeyOverride` is true when the environment holds a variable that COULD point the CLI at
+ * metered API billing — `ANTHROPIC_API_KEY` and the Bedrock/Vertex switches. It is the "is
+ * there a choice to make" flag, and it is what makes the header's switch appear; whether the
+ * key actually won is reported separately, by `subscription` on the `ok` shape, which comes
+ * from the CLI rather than from guessing at the vendor's precedence.
  *
- * This app strips those from every CLI it spawns, so nothing it runs is ever billed to a key.
- * The sign-in TERMINAL is the one exception, and unavoidably so: it is the user's own login
- * shell, which re-reads their profile after we hand it the command. A login started there can
- * therefore no-op as "already authenticated" against the key while this app, reading status
- * with the key stripped, still reports signed-out — a Retry loop with no visible cause.
+ * Reported in every state, because the state it matters most in is `logged_out`: the user is
+ * one click from a sign-in that their own shell may quietly redirect. The sign-in TERMINAL is
+ * the one thing no mode reaches, and unavoidably so — it is the user's own login shell, which
+ * re-reads their profile after we hand it the command. A login started there can therefore
+ * no-op as "already authenticated" against the key while this app, in `subscription` mode,
+ * still reports signed-out — a Retry loop with no visible cause.
  *
  * Telling the user is the only fix that does not involve dictating their shell environment.
  */
 interface EnvOverride {
   apiKeyOverride: boolean
+  credentialMode: CredentialMode
 }
 
 /** Shape of `GET /api/auth`. Mirrors the provider's auth report, narrowed for the browser. */

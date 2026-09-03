@@ -34,6 +34,48 @@ interface AuthStatusJson {
   apiProvider?: string
   email?: string
   subscriptionType?: string
+  /**
+   * WHICH CREDENTIAL IS ACTUALLY BEING BILLED. The field this whole app turns on.
+   *
+   * `'ANTHROPIC_API_KEY'` (environment), `'apiKeyHelper'`, `'/login managed key'`, or
+   * `'none'`/absent for an OAuth login. Crucially it is INDEPENDENT of the three fields
+   * above: with a key exported, `auth status` still reports `loggedIn: true`,
+   * `authMethod: 'claude.ai'` and `subscriptionType: 'max'` — the OAuth login is real and
+   * still on file — while `apiKeySource` says the key is what requests will use.
+   *
+   * Verified against claude 2.1.x on 2026-09-03: the only difference between the two runs was
+   * this field appearing. Reading the first three alone reports "Max" for a session billed
+   * per token, which is the exact lie the badge exists to prevent.
+   */
+  apiKeySource?: string
+}
+
+/**
+ * Turn one `auth status --json` payload into the app's auth report.
+ *
+ * Split out from the spawn so the decision that matters — which credential gets billed — can
+ * be tested as the pure function it is, without stubbing a subprocess. Same reasoning as
+ * `terminal.ts`: the command's shape is a string, so test it as one.
+ */
+export function readAuthStatus(raw: AuthStatusJson): ProviderAuth {
+  if (!raw.loggedIn) {
+    return { state: 'logged_out', plan: null, account: null, subscription: false }
+  }
+
+  // An API key does NOT change apiProvider or authMethod — see the note on `apiKeySource`.
+  // All three have to agree before this claims the plan is what gets billed.
+  const keySource = typeof raw.apiKeySource === 'string' ? raw.apiKeySource : null
+  const billedToKey = keySource !== null && keySource !== 'none'
+
+  return {
+    state: 'ok',
+    plan: typeof raw.subscriptionType === 'string' ? raw.subscriptionType : null,
+    account: typeof raw.email === 'string' ? raw.email : null,
+    // A first-party claude.ai credential is the subscription path — unless a key is sitting
+    // in front of it, in which case the UI warns about per-token billing instead.
+    subscription:
+      raw.apiProvider === 'firstParty' && raw.authMethod === 'claude.ai' && !billedToKey,
+  }
 }
 
 async function authStatus(): Promise<ProviderAuth> {
@@ -61,19 +103,7 @@ async function authStatus(): Promise<ProviderAuth> {
 
     if (code !== 0) return { state: 'unknown', plan: null, account: null, subscription: false }
 
-    const raw = JSON.parse(stdout) as AuthStatusJson
-    if (!raw.loggedIn) {
-      return { state: 'logged_out', plan: null, account: null, subscription: false }
-    }
-
-    return {
-      state: 'ok',
-      plan: typeof raw.subscriptionType === 'string' ? raw.subscriptionType : null,
-      account: typeof raw.email === 'string' ? raw.email : null,
-      // A first-party claude.ai credential is the subscription path. An API key reports a
-      // different apiProvider, and the UI warns about per-token billing when it does.
-      subscription: raw.apiProvider === 'firstParty' && raw.authMethod === 'claude.ai',
-    }
+    return readAuthStatus(JSON.parse(stdout) as AuthStatusJson)
   } catch (err) {
     console.error('[claude] auth status failed:', err)
     return { state: 'unknown', plan: null, account: null, subscription: false }

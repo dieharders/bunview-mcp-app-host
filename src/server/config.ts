@@ -53,7 +53,47 @@ const settingSources = (str('BUNVIEW_SETTING_SOURCES') ?? '')
     (s): s is 'user' | 'project' | 'local' => s === 'user' || s === 'project' || s === 'local',
   )
 
-const permissionMode = str('BUNVIEW_PERMISSION_MODE') ?? 'default'
+/**
+ * Where the credential mode starts.
+ *
+ * `BUNVIEW_ALLOW_API_KEY` is the variable this replaced. It is still honoured — but only in
+ * the one direction that means something now. Someone who set it to `0` asked for the strip,
+ * and silently ignoring a safety setting because it was renamed is precisely the "wrong
+ * override, quietly" failure this project refuses elsewhere. `=1` needs no handling: it asked
+ * for the behaviour that is now the default.
+ */
+function credentialModeSeed(): 'auto' | 'subscription' {
+  const explicit = str('BUNVIEW_CREDENTIAL_MODE')
+  if (explicit === 'auto' || explicit === 'subscription') return explicit
+
+  if (explicit) {
+    console.warn(
+      `✗ BUNVIEW_CREDENTIAL_MODE is not a mode: ${explicit}\n  Expected 'auto' or 'subscription'. Using 'auto'.`,
+    )
+  }
+
+  const legacy = process.env.BUNVIEW_ALLOW_API_KEY
+  if (legacy !== undefined && !bool('BUNVIEW_ALLOW_API_KEY', true)) {
+    console.warn(
+      '! BUNVIEW_ALLOW_API_KEY is deprecated. Using BUNVIEW_CREDENTIAL_MODE=subscription,\n' +
+        '  which is the same behaviour. The default is now `auto`, and the app offers the\n' +
+        '  switch in its header instead of deciding for the user.',
+    )
+    return 'subscription'
+  }
+
+  return 'auto'
+}
+
+/**
+ * `dontAsk`, not `default`.
+ *
+ * `default` prompts for anything not pre-approved — and this app has nowhere to show a
+ * prompt. A headless session that stops to ask a question nobody can answer is a hang, not a
+ * safety feature. `dontAsk` denies instead, which is the same decision made immediately and
+ * visibly. Anything the app genuinely needs is named in `allowedTools` below.
+ */
+const permissionMode = str('BUNVIEW_PERMISSION_MODE') ?? 'dontAsk'
 
 if (permissionMode === 'bypassPermissions' && !bool('BUNVIEW_ALLOW_BYPASS', false)) {
   // Refuse rather than warn. `bypassPermissions` disables every permission check, and a
@@ -100,26 +140,55 @@ export const config = {
   model: str('BUNVIEW_MODEL'),
 
   /**
-   * Read-only by default.
+   * The base set of built-in tools that EXIST for this session. The real fence.
    *
-   * `allowedTools` pre-approves, so no permission prompt can arise in a headless session
-   * that has no terminal to show one on. `disallowedTools` is the actual fence. The app's
-   * own MCP tools are pre-approved because they are ours and they only touch app state.
+   * This replaced a `disallowedTools` denylist, and the difference is the whole point. The
+   * SDK's own doc comment on `allowedTools` says it outright: "List of tool names that are
+   * auto-allowed without prompting for permission. **To restrict which tools are available,
+   * use the `tools` option instead.**" A denylist has to name every dangerous tool, which
+   * means a tool added by a future CLI release is permitted by default — the failure mode
+   * being that you find out from a changelog. An allowlist inverts that: anything not named
+   * here does not exist, forever, without maintenance.
+   *
+   * `[]` disables every built-in tool, which is the right value for an app whose agent should
+   * only ever touch app state through its own MCP tools. This scaffold keeps the three
+   * read-only ones so the example prompts have something to demonstrate.
+   *
+   * Note this governs BUILT-IN tools only. The app's own `mcp__bunview__*` tools arrive via
+   * `mcpServers` and are unaffected — emptying this list does not disarm them.
+   */
+  tools: (str('BUNVIEW_TOOLS') ?? 'Read,Grep,Glob')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean),
+
+  /**
+   * Pre-approved, so no permission prompt can arise in a headless session that has no terminal
+   * to show one on. NOT a restriction — see `tools` above, which is.
+   *
+   * The app's own MCP tools are here because they are ours and only touch app state.
    */
   allowedTools: (str('BUNVIEW_ALLOWED_TOOLS') ?? 'Read,Grep,Glob,mcp__bunview__*')
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean),
 
-  disallowedTools: (
-    str('BUNVIEW_DISALLOWED_TOOLS') ?? 'Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch'
-  )
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
-
   permissionMode,
   settingSources,
+
+  /**
+   * Seed for the credential mode; the live value lives in `credentials.ts` because the user
+   * can change it from the header while the app is running.
+   *
+   * `auto` — hand the CLI the environment as the user actually has it, and let the vendor's
+   * own precedence pick. This is the default because the terms for running Claude Code inside
+   * another product forbid the host removing an authentication method built into it, and an
+   * unconditional strip of `ANTHROPIC_API_KEY` is exactly that.
+   *
+   * `subscription` — strip the overrides so the plan is billed. Reachable in one click from
+   * the header whenever a key is actually present, which is the only time the choice is real.
+   */
+  credentialMode: credentialModeSeed(),
 
   /** Extra text appended to the system prompt, for apps that need to steer the agent. */
   appendSystemPrompt: str('BUNVIEW_SYSTEM_PROMPT'),

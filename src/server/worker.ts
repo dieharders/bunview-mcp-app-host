@@ -10,6 +10,7 @@ import index from '../client/index.html'
 import { handleAuth } from './auth'
 import { handleChat } from './chat'
 import { config } from './config'
+import { handleCredentials } from './credentials'
 import { hookShutdown } from './proc'
 import { handleInstall, handleLogin } from './setup'
 import { getState, resetState } from './state'
@@ -52,6 +53,11 @@ const server = Bun.serve({
       GET: () => Response.json(getState()),
       DELETE: () => Response.json(resetState()),
     },
+
+    // Which credential the spawned CLI may use. POST because it changes what the next chat
+    // turn is billed to; the client re-probes /api/auth afterwards rather than trusting the
+    // response, because only the CLI can say which credential actually won.
+    '/api/credentials': { POST: handleCredentials },
 
     // The only two endpoints that change the user's machine or open an external flow. Both
     // are POST, and both are reached only from an explicit click that shows what will run.

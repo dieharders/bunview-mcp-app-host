@@ -1,22 +1,30 @@
 /**
  * The environment every child process gets.
  *
- * `ANTHROPIC_API_KEY` and friends are STRIPPED, and that is the whole point of this file.
- *
  * The premise of this scaffold is that it runs on the user's Claude Pro/Max subscription:
  * `claude auth login` writes OAuth credentials to disk, the agent binary reads them at spawn
  * time, and usage bills against the plan. But the CLI PREFERS an API key when one is present
- * in the environment. So a developer who happens to have `ANTHROPIC_API_KEY` exported for
- * unrelated work would be silently billed per token by an app that advertises itself as
- * running on their subscription — with no visible symptom until the invoice.
+ * in the environment — so a developer who happens to have `ANTHROPIC_API_KEY` exported for
+ * unrelated work gets billed per token by an app that says it runs on their subscription.
  *
- * Set `BUNVIEW_ALLOW_API_KEY=1` to opt back in deliberately.
+ * WHAT CHANGED, AND WHY.
  *
- * Stripping covers every CLI this app spawns — chat turns and status probes alike — so what
- * it runs is never billed to a key. The one place it cannot reach is the sign-in TERMINAL,
- * which is the user's own login shell by design; `hadApiKeyOverride` exists so the UI can say
- * so rather than pretend otherwise. See `terminal.ts`.
+ * The obvious fix — delete those variables from every child — is the one this file used to
+ * implement, and it is the wrong shape. Anthropic's terms for running Claude Code inside
+ * another product say the host may not "remove, disable, or restrict any authentication method
+ * built into it (including methods that permit signing in with a Claude account or the user's
+ * own API key)". Stripping the key by default is disabling one of those methods.
+ *
+ * So the strip is still here, but it is now something the USER turns on, one click, from the
+ * header — and the app's job is reduced to telling them the truth about which credential is
+ * live. See `credentials.ts` for the mode and `providers/claude.ts` for the detection that
+ * makes the badge honest.
+ *
+ * The one place none of this reaches is the sign-in TERMINAL, which is the user's own login
+ * shell by design; `hadApiKeyOverride` exists so the UI can say so rather than pretend
+ * otherwise. See `terminal.ts`.
  */
+import { getCredentialMode } from './credentials'
 import type { ProviderId } from '../shared/events'
 
 /** Variables that would redirect auth away from the subscription credential. */
@@ -35,14 +43,21 @@ export function childEnv(): Record<string, string | undefined> {
   // credentials.
   const env: Record<string, string | undefined> = { ...process.env }
 
-  if (process.env.BUNVIEW_ALLOW_API_KEY === '1') return env
+  // `auto` hands the binary the environment as the user actually has it and lets the vendor's
+  // own precedence decide. Only an explicit choice removes anything.
+  if (getCredentialMode() !== 'subscription') return env
 
   for (const key of OVERRIDES) delete env[key]
   return env
 }
 
 /**
- * True when the environment would have redirected billing away from the subscription.
+ * True when the environment holds a variable that COULD redirect billing away from the
+ * subscription — regardless of the current mode, and regardless of whether it won.
+ *
+ * This is the "is there a choice to make here" predicate, not the "which one won" predicate.
+ * The second question is answered by the CLI itself, via `apiKeySource` in its auth status;
+ * asking the environment would only ever be a guess at the vendor's precedence rules.
  *
  * Takes the provider because every variable in OVERRIDES is one of Anthropic's — none of them
  * changes what Codex does, so reporting one to a Codex user would be a warning about nothing.

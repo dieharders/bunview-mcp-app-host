@@ -3,6 +3,7 @@ import type {
   AppState,
   AuthResponse,
   ChatRequest,
+  CredentialMode,
   ProviderId,
   SetupEvent,
 } from '../../shared/events'
@@ -28,6 +29,27 @@ export async function fetchAuth(provider: ProviderId, signal?: AbortSignal): Pro
   }
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
   return (await res.json()) as AuthResponse
+}
+
+/**
+ * Choose which credential the spawned CLI may use.
+ *
+ * Resolves once the server has accepted the change. The caller then re-probes `/api/auth`
+ * rather than trusting this to describe the result: what the CLI does with the environment is
+ * the CLI's answer to give, and the badge should report what it says, not what we intended.
+ */
+export async function setCredentialMode(mode: CredentialMode): Promise<void> {
+  let res: Response
+  try {
+    res = await fetch('/api/credentials', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    })
+  } catch {
+    throw new ApiError('network', 0)
+  }
+  if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status)
 }
 
 /**

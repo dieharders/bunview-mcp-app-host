@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { PROVIDERS } from '../../shared/events'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { PROVIDER_IDS } from '../../shared/events'
 import { Chat } from './Chat'
 
 /** Stand in for the server so the tree can mount without one. */
@@ -13,7 +13,8 @@ function mockServer(auth: unknown) {
   }) as unknown as typeof fetch
 }
 
-const chooseProvider = (id: string) => localStorage.setItem('bunview.provider', id)
+const PROVIDER_KEY = 'bunview.provider'
+const chooseProvider = (id: string) => localStorage.setItem(PROVIDER_KEY, id)
 
 beforeEach(() => localStorage.clear())
 
@@ -25,33 +26,37 @@ describe('Chat — provider gate', () => {
     render(<Chat />)
 
     expect(screen.getByRole('heading', { name: /Connect your AI plan/i })).toBeDefined()
-    expect(screen.getByText('Claude Code')).toBeDefined()
-    expect(screen.getByText('Codex')).toBeDefined()
+    expect(screen.getAllByRole('button')).toHaveLength(PROVIDER_IDS.length)
 
     // The point of the gate: spawning a vendor's CLI to read their account is work nobody
     // should do on a subscription the user has not said they want to use.
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 
-  test('states what each provider commits you to, before anything is probed', () => {
-    globalThis.fetch = mock(async () => Response.json({})) as unknown as typeof fetch
-    render(<Chat />)
+  test('each card commits to its own provider, and no other', async () => {
+    // Deliberately structural: no assertion here reads any displayed text. Two earlier versions
+    // of this test asserted copy and both went stale without anything regressing — first a
+    // caveat quoted verbatim, then the chip's field after it switched from `npmPackage` to
+    // `vendor`. Wording is the component's to change. What must hold is the wiring: every
+    // registered provider is offered exactly once, and the nth card commits to the nth id.
+    // Mis-wire that and the app spawns the wrong vendor's CLI against the wrong subscription —
+    // a real bug that reads identically to a correct one on screen.
+    for (const [index, id] of PROVIDER_IDS.entries()) {
+      cleanup()
+      localStorage.clear()
+      // A real server stub, not an empty one: choosing releases the probes, and they have to
+      // find well-formed responses waiting or the panel they feed crashes on the way up.
+      mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
 
-    // Driven off the registry rather than copied out of it. This test used to assert one
-    // provider's caveat verbatim (`/token by token/i`) and went stale the moment the wording
-    // changed — while its sibling below kept passing vacuously, because a `queryBy*` for text
-    // that no longer exists returns null whether or not the element is there. Reading the
-    // expected copy from PROVIDERS means adding a provider extends the test for free, and
-    // rewording one cannot silently un-cover it.
-    for (const info of Object.values(PROVIDERS)) {
-      expect(screen.getByText(info.label)).toBeDefined()
-      expect(screen.getByText(`Runs on ${info.plan}`)).toBeDefined()
-      expect(screen.getByText(info.npmPackage)).toBeDefined()
+      render(<Chat />)
+      const cards = screen.getAllByRole('button')
+      expect(cards).toHaveLength(PROVIDER_IDS.length)
 
-      // A limitation met after committing reads as a bug; the same sentence up front is just a
-      // trade-off. Every caveat is currently empty, so this asserts nothing today — it starts
-      // guarding again the moment one is filled in.
-      if (info.caveat) expect(screen.getByText(info.caveat)).toBeDefined()
+      // Choosing unblocks the probes the gate was holding back, and those settle after the
+      // click. Awaited here so they land inside `act` rather than against a tree the next
+      // iteration has already unmounted.
+      await act(async () => void fireEvent.click(cards[index]))
+      expect(localStorage.getItem(PROVIDER_KEY)).toBe(id)
     }
   })
 

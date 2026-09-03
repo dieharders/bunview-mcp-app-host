@@ -110,7 +110,52 @@ export const appToolsServer = createSdkMcpServer({
 
 ## Forking:
 
+### Tools
+
 Delete the three example tools and register your own.
+
+### Naming
+
+The BunView name is carried across code, build config and CI.
+
+**Rename in lockstep:**
+
+- [ ] **Binary identity** — `APP_NAME`, `DISPLAY_NAME`, `BUNDLE_ID`, `PUBLISHER`, `COPYRIGHT_YEAR`
+      in [build.ts:24-36](build.ts#L24-L36), **and** both of its downstream consumers:
+      [`.gitignore:5-8`](.gitignore#L5-L8), which excludes the built binary _by literal name_ —
+      miss it and your new multi-megabyte executable starts getting committed — and
+      [`release.yml:52-80`](.github/workflows/release.yml#L52-L80), which builds every artifact
+      name from `APP_NAME` and probes for `${DISPLAY_NAME}-macos.app` on line 60.
+- [ ] **MCP server name** — [`app-tools.ts:27`](src/server/mcp/app-tools.ts#L27) `name: 'bunview'`
+      **and** the `mcp__bunview__*` glob in `BUNVIEW_ALLOWED_TOOLS` at
+      [`config.ts:93`](src/server/config.ts#L93). Tool IDs are built from that name, so changing
+      one side alone means every call to your own tools is silently denied.
+- [ ] **localStorage key** — `PROVIDER_KEY` in
+      [`Chat.tsx:22`](src/client/components/Chat.tsx#L22) **and** the same literal in
+      [`Chat.test.tsx:16`](src/client/components/Chat.test.tsx#L16).
+- [ ] **Data folder** — the three `'BunView'` arms of
+      [`platform.ts:92-97`](src/server/install/platform.ts#L92-L97). Renaming this after you ship
+      orphans any CLI a user already installed, and the app offers to download it again.
+
+**Safe to rename any time:**
+
+- [ ] **Package metadata** — `name`, `description`, `repository` in
+      [package.json](package.json#L2-L11).
+- [ ] **Copyright holder** — [LICENSE](LICENSE#L3). Leave the rest of that file byte-for-byte or
+      GitHub stops detecting the license.
+- [ ] **Env prefix** — 16 `BUNVIEW_*` vars across [src/server/](src/server/), plus the Safety
+      defaults table below.
+- [ ] **Titles** — the console banner at [main.ts:198](main.ts#L198), the native window title at
+      [main.ts:217](main.ts#L217), and the page title at
+      [`index.html:7`](src/client/index.html#L7). All three are separate.
+- [ ] **UI copy** — the header in [Chat.tsx:111](src/client/components/Chat.tsx#L111), the prose in
+      [ProviderPicker.tsx:18](src/client/components/ProviderPicker.tsx#L18) and
+      [SetupBanner.tsx:109-110](src/client/components/SetupBanner.tsx#L109-L110), and the
+      `cli_missing` message at [`events.ts:47`](src/shared/events.ts#L47).
+- [ ] **Icon** — `assets/icon.svg` has the wordmark set as live text, so edit it there, then
+      regenerate `assets/icon.ico` from it. Only the `.ico` is read at build time;
+      [build-icons.ts](build-icons.ts) decodes it into the `.icns` and `.png` that macOS and Linux
+      want, so the `.ico` is the one that must actually change.
 
 ## Safety defaults
 

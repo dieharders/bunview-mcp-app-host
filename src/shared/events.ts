@@ -193,8 +193,15 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
       {
         id: 'thinking',
         label: 'Thinking',
-        values: ['adaptive', 'off'],
-        hint: 'Adaptive lets Claude decide how much to reason.',
+        // `default` FIRST, and therefore the default — see `settingDefault` below, which is
+        // why this matters. With `adaptive` in this slot `coerceSettings` filled the setting
+        // with it on every turn, so claude-options.ts sent `thinking: {type:'adaptive'}`
+        // unconditionally and its "omit and let the CLI decide" branch was unreachable.
+        // Adaptive is Opus 4.6+ (`ThinkingAdaptive` in the SDK types says so) and is ALREADY
+        // the CLI's own default on models that support it — so omitting gets the good
+        // behaviour everywhere, while sending it explicitly aims it at haiku too.
+        values: ['default', 'adaptive', 'off'],
+        hint: 'Adaptive lets Claude decide how much to reason (Opus 4.6+).',
       },
     ],
   },
@@ -299,9 +306,18 @@ export interface ChatRequest {
  * `subscription` — the app strips those variables from the CLIs it spawns, so the plan is
  *                  billed.
  *
- * The default is `auto` and the switch is the USER'S. An app that hosts the vendor's binary
- * may not remove an authentication method built into it, and stripping the key unconditionally
- * is that — so the protection is one click away in the header rather than a silent default.
+ * The default is `subscription`, because that is this app's premise: a developer who happens
+ * to have `ANTHROPIC_API_KEY` exported for unrelated work should not discover afterwards that
+ * a scaffold advertising "runs on your plan" was billing their card.
+ *
+ * That default is bounded by two rules, and both are load-bearing. An app that hosts the
+ * vendor's binary may not remove, disable or RESTRICT an authentication method built into it:
+ *
+ *   1. The strip is never the last word. It is one labelled click away in the header whenever
+ *      a key is present, which is the only time the choice is real.
+ *   2. The strip never takes the LAST credential. `authStatus` in providers/claude.ts probes
+ *      twice and drops back to `auto` for a user whose only credential is the key, rather than
+ *      reporting them signed-out over a login the app itself hid.
  */
 export const CREDENTIAL_MODES = ['auto', 'subscription'] as const
 export type CredentialMode = (typeof CREDENTIAL_MODES)[number]
@@ -323,10 +339,22 @@ export type CredentialMode = (typeof CREDENTIAL_MODES)[number]
  * still reports signed-out — a Retry loop with no visible cause.
  *
  * Telling the user is the only fix that does not involve dictating their shell environment.
+ *
+ * `keySource` is the CLI's own name for the credential in play, and it exists because
+ * `apiKeyOverride` cannot answer the question on its own. A key configured through
+ * `apiKeyHelper` or a `/login` managed key lives in the user's Claude settings, not in the
+ * environment — so `apiKeyOverride` is false, the header's switch is hidden, and the badge
+ * still (correctly) says "billed per token". That combination was a warning naming no cause
+ * and offering no action. With the source reported, the UI can say WHERE the key came from and
+ * that BunView cannot strip it, which is the honest version of the same warning.
+ *
+ * Optional because it is the provider's to report or not: Codex has no equivalent and fakes
+ * nothing.
  */
 interface EnvOverride {
   apiKeyOverride: boolean
   credentialMode: CredentialMode
+  keySource?: string | null
 }
 
 /** Shape of `GET /api/auth`. Mirrors the provider's auth report, narrowed for the browser. */

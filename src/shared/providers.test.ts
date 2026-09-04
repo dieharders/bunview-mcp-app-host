@@ -102,7 +102,21 @@ describe('coercion is the server-side guard', () => {
   })
 
   test('a bad value for a declared key falls back to that key’s default', () => {
-    expect(coerceSettings('claude', { thinking: 'banana' }).thinking).toBe('adaptive')
+    expect(coerceSettings('claude', { thinking: 'banana' }).thinking).toBe('default')
+  })
+
+  test('thinking defaults to `default`, which is what makes omitting it reachable', () => {
+    // Not cosmetic. `coerceSettings` FILLS every declared setting rather than leaving it
+    // absent, so whatever sits first in `values` is what claude-options.ts receives on every
+    // single turn. With `adaptive` there, its "omit and let the CLI decide" branch could never
+    // run and `thinking: {type:'adaptive'}` — an Opus 4.6+ option, and already the default on
+    // the models that have it — went out on haiku turns too.
+    expect(defaultSettings('claude').thinking).toBe('default')
+    expect(coerceSettings('claude', undefined).thinking).toBe('default')
+
+    // The other two stay reachable as explicit choices.
+    expect(coerceSettings('claude', { thinking: 'adaptive' }).thinking).toBe('adaptive')
+    expect(coerceSettings('claude', { thinking: 'off' }).thinking).toBe('off')
   })
 
   test('missing settings are filled with defaults rather than left absent', () => {

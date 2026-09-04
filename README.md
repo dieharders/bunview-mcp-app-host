@@ -127,15 +127,16 @@ Desktop only. The whole design spawns a local process, which is not supported on
 
 ### Prevent accidental API usage
 
-If `ANTHROPIC_API_KEY` is set in the environment, the CLI prefers it and bills API credits instead of your plan. BunView makes that **visible and switchable** rather than deciding for you:
+If `ANTHROPIC_API_KEY` is set in the environment, the CLI prefers it and bills API credits instead of your plan. BunView **defaults to your plan** and makes the other choice visible rather than hidden:
 
-- The badge reports which credential is actually used
-- When a key is present, the header offers **Use my plan** / **Use API key**. Choosing the plan makes [`src/server/env.ts`](src/server/env.ts) strip `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches from the CLIs BunView spawns. With no key present the switch is hidden, because there is no second option.
-- `BUNVIEW_CREDENTIAL_MODE=subscription` starts in the stripped mode for a deployment that wants it.
+- **Default `subscription`.** [`src/server/env.ts`](src/server/env.ts) strips `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches from the CLIs BunView spawns, so a key you exported for unrelated work does not quietly spend your card here.
+- The badge reports which credential is actually used — from the CLI's own `apiKeySource`, not from a guess.
+- When a key is present, the header offers **Use my plan** / **Use API key**. With no key present the switch is hidden, because there is no second option.
+- `BUNVIEW_CREDENTIAL_MODE=auto` starts in pass-through mode, which is the binary's own precedence.
 
-**Why a choice and not a default.** Anthropic's [terms](https://code.claude.com/docs/en/legal-and-compliance) for running Claude Code inside another product require that the binary run as published and that the host not "remove, disable, or restrict any authentication method built into it (including methods that permit signing in with a Claude account **or the user's own API key**)".
+**Why the default is bounded.** Anthropic's [terms](https://code.claude.com/docs/en/legal-and-compliance) for running Claude Code inside another product require that the binary run as published and that the host not "remove, disable, or restrict any authentication method built into it.
 
-`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`, `codex login status`) and reports which credential is actually in play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key — usage is billed per token”_ when it is not.
+`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`, `codex login status`) and reports which credential is actually in play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key — usage is billed per token”_ when it is not. When that key came from `apiKeyHelper` or a managed `/login` key — settings BunView cannot reach, so no switch is offered — the badge tooltip names the source, since the fix is in your Claude settings rather than in this app.
 
 ## MCP: The App is the host
 
@@ -208,20 +209,20 @@ The BunView name is carried across code, build config and CI.
 
 Read-only.
 
-| Env var                                | Default                          | Effect                                                             |
-| -------------------------------------- | -------------------------------- | ------------------------------------------------------------------ |
-| `BUNVIEW_TOOLS`                        | `Read,Grep,Glob`                 | **The fence.** Built-in tools that exist at all; `` = none         |
-| `BUNVIEW_ALLOWED_TOOLS`                | `Read,Grep,Glob,mcp__bunview__*` | Pre-approved, so no prompt can arise in a headless session         |
-| `BUNVIEW_PERMISSION_MODE`              | `dontAsk`                        | `bypassPermissions` additionally requires `BUNVIEW_ALLOW_BYPASS=1` |
-| `BUNVIEW_SETTING_SOURCES`              | _(empty)_                        | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers  |
-| `BUNVIEW_CWD`                          | `homedir()`                      | Session bucket, and the only directory the file tools can reach    |
-| `BUNVIEW_MODEL`                        | _(CLI default)_                  | Claude only. Also selectable per-message in the UI                 |
-| `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                   | Explicit path to the Claude binary                                 |
-| `BUNVIEW_CODEX_PATH`                   | _(discovered)_                   | Explicit path to the Codex binary                                  |
-| `BUNVIEW_ALLOW_INSTALL`                | `1`                              | Offer to install a missing CLI. Set `0` for managed/offline builds |
-| `BUNVIEW_CREDENTIAL_MODE`              | `auto`                           | `subscription` ignores `ANTHROPIC_API_KEY`. Switchable in the UI   |
-| `BUNVIEW_STALL_MS` / `BUNVIEW_WALL_MS` | `120000` / `600000`              | Silence cap / total cap                                            |
-| `BUNVIEW_PORT`                         | `0`                              | `0` = ephemeral                                                    |
+| Env var                                | Default                          | Effect                                                                |
+| -------------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
+| `BUNVIEW_TOOLS`                        | `Read,Grep,Glob`                 | **The fence.** Built-in tools that exist at all; set-but-empty = none |
+| `BUNVIEW_ALLOWED_TOOLS`                | `Read,Grep,Glob,mcp__bunview__*` | Pre-approved, so no prompt can arise in a headless session            |
+| `BUNVIEW_PERMISSION_MODE`              | `dontAsk`                        | `bypassPermissions` additionally requires `BUNVIEW_ALLOW_BYPASS=1`    |
+| `BUNVIEW_SETTING_SOURCES`              | _(empty)_                        | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers     |
+| `BUNVIEW_CWD`                          | `homedir()`                      | Session bucket, and the only directory the file tools can reach       |
+| `BUNVIEW_MODEL`                        | _(CLI default)_                  | Claude only. Also selectable per-message in the UI                    |
+| `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                   | Explicit path to the Claude binary                                    |
+| `BUNVIEW_CODEX_PATH`                   | _(discovered)_                   | Explicit path to the Codex binary                                     |
+| `BUNVIEW_ALLOW_INSTALL`                | `1`                              | Offer to install a missing CLI. Set `0` for managed/offline builds    |
+| `BUNVIEW_CREDENTIAL_MODE`              | `subscription`                   | `auto` lets the CLI prefer `ANTHROPIC_API_KEY`. Switchable in the UI  |
+| `BUNVIEW_STALL_MS` / `BUNVIEW_WALL_MS` | `120000` / `600000`              | Silence cap / total cap                                               |
+| `BUNVIEW_PORT`                         | `0`                              | `0` = ephemeral                                                       |
 
 Three things are worth knowing about the defaults:
 

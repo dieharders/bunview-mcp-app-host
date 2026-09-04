@@ -7,18 +7,26 @@
  * in the environment — so a developer who happens to have `ANTHROPIC_API_KEY` exported for
  * unrelated work gets billed per token by an app that says it runs on their subscription.
  *
- * WHAT CHANGED, AND WHY.
+ * WHAT BOUNDS THE STRIP.
  *
- * The obvious fix — delete those variables from every child — is the one this file used to
- * implement, and it is the wrong shape. Anthropic's terms for running Claude Code inside
- * another product say the host may not "remove, disable, or restrict any authentication method
- * built into it (including methods that permit signing in with a Claude account or the user's
- * own API key)". Stripping the key by default is disabling one of those methods.
+ * The obvious fix — delete those variables from every child — is what this file does, and it
+ * is the default. But it cannot be an UNCONDITIONAL default: Anthropic's terms for running
+ * Claude Code inside another product say the host may not "remove, disable, or restrict any
+ * authentication method built into it (including methods that permit signing in with a Claude
+ * account or the user's own API key)".
  *
- * So the strip is still here, but it is now something the USER turns on, one click, from the
- * header — and the app's job is reduced to telling them the truth about which credential is
- * live. See `credentials.ts` for the mode and `providers/claude.ts` for the detection that
- * makes the badge honest.
+ * The strip survives as a default because two things keep the key method reachable rather than
+ * removed, and neither is optional:
+ *
+ *   1. The user can turn it off in one click from the header, and the badge tells them the
+ *      truth about which credential is live meanwhile. See `credentials.ts` for the mode.
+ *   2. It never takes the LAST credential. `providers/claude.ts` probes with the strip applied
+ *      and again without it, and drops the whole app back to `auto` for a user whose only
+ *      credential is the key — rather than reporting them signed-out over a login this file
+ *      hid from the binary.
+ *
+ * Rule 2 is the one that is easy to delete by accident, because nothing fails loudly when it
+ * goes: the user just sees "not signed in" forever.
  *
  * The one place none of this reaches is the sign-in TERMINAL, which is the user's own login
  * shell by design; `hadApiKeyOverride` exists so the UI can say so rather than pretend

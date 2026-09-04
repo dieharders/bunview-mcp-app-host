@@ -4,13 +4,16 @@
  * This is the file that decides whether a chat turn spends the user's Claude plan or their API
  * credits, so the tests are about the two directions of that switch and nothing else.
  *
- * The behaviour under test CHANGED, and the change is the reason these exist. `childEnv` used
- * to strip `ANTHROPIC_API_KEY` unconditionally. Anthropic's terms for running Claude Code
- * inside another product say the host may not remove or disable an authentication method built
- * into the binary — the user's own API key being explicitly named as one — so the strip became
- * a user-chosen mode with `auto` as the default. `auto passes the key through` below is
- * therefore a REQUIREMENT, not an oversight: if someone "fixes" it back to stripping by
- * default, that test is what should stop them.
+ * `childEnv` once stripped `ANTHROPIC_API_KEY` unconditionally, and Anthropic's terms for
+ * running Claude Code inside another product say the host may not remove, disable or restrict
+ * an authentication method built into the binary — the user's own API key being explicitly
+ * named as one. The strip is still the default, because being silently billed per token is the
+ * footgun this app exists to close; what changed is that it is now BOUNDED.
+ *
+ * `auto passes the key through` below is a REQUIREMENT rather than an oversight: it is the
+ * mode the header switches to, and the mode providers/claude.ts falls back to for a user whose
+ * only credential is the key. If someone makes `auto` strip too, there is no longer any state
+ * in which the key method works, and that test is what should stop them.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { getCredentialMode, setCredentialMode } from './credentials'

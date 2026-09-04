@@ -41,12 +41,23 @@ export function AuthBadge({ provider, auth }: { provider: ProviderId; auth: Auth
       ? `${auth.plan ?? 'subscription'} plan`
       : 'API key — billed per token'
 
+    // WHERE the key came from, and only when the header cannot offer to do anything about it.
+    //
+    // `apiKeyOverride` is environment-only, because the environment is the only thing BunView
+    // can strip. A key from `apiKeyHelper` or a managed `/login` key lives in the user's Claude
+    // settings, so that flag is false: no switch renders, and SetupBanner never appears at all
+    // because this state is `ok`. The result was an amber badge warning about per-token billing
+    // with no cause named anywhere on screen and no control to act on. Say the source out loud
+    // instead — it is the one thing that makes the warning actionable, since the fix is in the
+    // user's own settings rather than in this app.
+    const unreachableKey = !auth.subscription && !auth.apiKeyOverride ? auth.keySource : null
+
     // The visible text is split across spans for styling, which leaves a screen reader to
     // stitch "Claude Code", "·", "Max plan" together and gives tests nothing stable to assert
     // on. One `aria-label` states the whole thing — what is connected, and what pays for it.
     const summary = auth.subscription
       ? `${label}, using your ${auth.plan ?? 'subscription'} plan${auth.account ? `, signed in as ${auth.account}` : ''}`
-      : `${label}, using an API key — billed per token${auth.account ? `, signed in as ${auth.account}` : ''}`
+      : `${label}, using an API key${unreachableKey ? ` from ${unreachableKey}` : ''} — billed per token${auth.account ? `, signed in as ${auth.account}` : ''}`
 
     return (
       <span
@@ -56,7 +67,9 @@ export function AuthBadge({ provider, auth }: { provider: ProviderId; auth: Auth
         title={
           auth.subscription
             ? `${label} is signed in and using your ${auth.plan ?? 'subscription'} plan. Usage counts against that plan's limits.`
-            : `${label} is using an API key, so usage is billed per token rather than against your plan.`
+            : unreachableKey
+              ? `${label} is using an API key from ${unreachableKey}, so usage is billed per token rather than against your plan. That key is configured in your Claude settings rather than this app's environment, so BunView cannot switch away from it — remove it there to use your plan.`
+              : `${label} is using an API key, so usage is billed per token rather than against your plan.`
         }
       >
         <span

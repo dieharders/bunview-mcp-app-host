@@ -5,7 +5,8 @@ import { query } from '@anthropic-ai/claude-agent-sdk'
 import type { AppEvent } from '../../shared/events'
 import { errorCopy } from '../../shared/events'
 import { config } from '../config'
-import { childEnv } from '../env'
+import { getCredentialMode, setCredentialMode } from '../credentials'
+import { childEnv, hadApiKeyOverride } from '../env'
 import { getState, getVersion } from '../state'
 import { buildOptions } from './claude-options'
 import { CLAUDE_SPEC, discoverCli, isInstalled } from './discovery'
@@ -59,13 +60,13 @@ interface AuthStatusJson {
  */
 export function readAuthStatus(raw: AuthStatusJson): ProviderAuth {
   if (!raw.loggedIn) {
-    return { state: 'logged_out', plan: null, account: null, subscription: false }
+    return { state: 'logged_out', plan: null, account: null, subscription: false, keySource: null }
   }
 
   // An API key does NOT change apiProvider or authMethod — see the note on `apiKeySource`.
   // All three have to agree before this claims the plan is what gets billed.
-  const keySource = typeof raw.apiKeySource === 'string' ? raw.apiKeySource : null
-  const billedToKey = keySource !== null && keySource !== 'none'
+  const source = typeof raw.apiKeySource === 'string' ? raw.apiKeySource : null
+  const billedToKey = source !== null && source !== 'none'
 
   return {
     state: 'ok',
@@ -75,23 +76,33 @@ export function readAuthStatus(raw: AuthStatusJson): ProviderAuth {
     // in front of it, in which case the UI warns about per-token billing instead.
     subscription:
       raw.apiProvider === 'firstParty' && raw.authMethod === 'claude.ai' && !billedToKey,
+    // Passed through rather than reduced to the boolean above, because 'ANTHROPIC_API_KEY' and
+    // 'apiKeyHelper' need different advice: BunView can strip the first and cannot reach the
+    // second. Normalised to null when nothing is in front of the login, so the UI tests one
+    // field instead of also knowing that 'none' is a value.
+    keySource: billedToKey ? source : null,
   }
 }
 
-async function authStatus(): Promise<ProviderAuth> {
-  const found = await discover()
-  if (!isInstalled(found)) {
-    return { state: 'cli_missing', plan: null, account: null, subscription: false }
-  }
-
+/**
+ * Ask the CLI who it thinks it is, under a given environment.
+ *
+ * The environment is a PARAMETER because the answer depends on it, and that dependency is the
+ * whole reason `authStatus` below exists in the shape it does: the same machine reports
+ * `logged_out` with the key stripped and `ok` without it. Nothing can tell "this user has no
+ * credential" apart from "this user's only credential is the one we just hid" without asking
+ * twice.
+ */
+async function probeAuth(
+  argv: string[],
+  env: Record<string, string | undefined>,
+): Promise<ProviderAuth> {
   try {
     // ARGV, not `path`. A Node-launcher entry point is `[node, cli.js]`, and spawning the
     // `.js` alone execs a script as an image — which reported the badge as "unknown" while
     // sign-in, which already read argv, worked fine.
-    const proc = Bun.spawn([...found.argv, 'auth', 'status', '--json'], {
-      // Same environment as the chat turn. If these differed, the badge could report "Max"
-      // while every message was actually billed to an API key.
-      env: childEnv(),
+    const proc = Bun.spawn([...argv, 'auth', 'status', '--json'], {
+      env,
       stdout: 'pipe',
       stderr: 'pipe',
       windowsHide: true,
@@ -108,6 +119,65 @@ async function authStatus(): Promise<ProviderAuth> {
     console.error('[claude] auth status failed:', err)
     return { state: 'unknown', plan: null, account: null, subscription: false }
   }
+}
+
+/**
+ * THE STRIP MUST NEVER TAKE SOMEONE'S ONLY CREDENTIAL.
+ *
+ * `subscription` is the default mode, so before the user has chosen anything this app removes
+ * `ANTHROPIC_API_KEY` from the children it spawns. For a user with an OAuth login behind that
+ * key, that is the entire point — their plan gets billed instead of their card.
+ *
+ * For a user whose ONLY credential is the key it is a lockout, and a silent one. The probe runs
+ * under the same stripped environment as a chat turn (deliberately — a probe and a turn that
+ * disagree is how the badge ends up reporting "Max" over per-token billing), so it comes back
+ * `loggedIn: false`. The composer disables itself, the banner says "not signed in", and nothing
+ * on screen names the app as the reason a working credential stopped working.
+ *
+ * It is also the case the terms actually bite on. Restricting a built-in authentication method
+ * is one argument when the other method is right there and the switch is in the header; it is
+ * a different argument entirely when the method being restricted is the last one standing.
+ *
+ * So: probe, and when the strip is what produced the `logged_out`, undo it. The MODE changes
+ * rather than the report being patched — a report that disagrees with what gets billed is the
+ * one failure this file exists to prevent, and a patched report would send the very next turn
+ * into the same stripped environment that just failed. It moves toward `auto`, the permissive
+ * direction and the binary as published; the header immediately shows the amber per-token badge
+ * with `Use my plan` beside it, so this is visible and reversible rather than done behind the
+ * user's back.
+ */
+async function authStatus(): Promise<ProviderAuth> {
+  const found = await discover()
+  if (!isInstalled(found)) {
+    return { state: 'cli_missing', plan: null, account: null, subscription: false }
+  }
+
+  const stripped = await probeAuth(found.argv, childEnv())
+
+  // Only `logged_out` is worth a second probe. `unknown` means the CLI could not be read at
+  // all, and `ok` means the strip cost nothing — re-running it would just be a second spawn on
+  // the app's startup path.
+  if (
+    stripped.state !== 'logged_out' ||
+    getCredentialMode() !== 'subscription' ||
+    !hadApiKeyOverride('claude')
+  ) {
+    return stripped
+  }
+
+  const withKey = await probeAuth(found.argv, { ...process.env })
+
+  // Still nothing: the user genuinely has not signed in and the key is not usable either.
+  // Report that as found rather than leaving the mode flipped over a probe that proved nothing.
+  if (withKey.state !== 'ok') return stripped
+
+  console.warn(
+    '! ANTHROPIC_API_KEY is the only working credential here, so BunView is not stripping it.\n' +
+      '  Credential mode is now `auto` and usage is billed per token. Run `claude auth login`\n' +
+      '  and choose "Use my plan" in the header to bill your subscription instead.',
+  )
+  setCredentialMode('auto')
+  return withKey
 }
 
 async function* stream(opts: StreamOptions, signal: AbortSignal): AsyncGenerator<AppEvent> {

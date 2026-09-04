@@ -35,6 +35,24 @@ const bool = (key: string, fallback: boolean): boolean => {
 }
 
 /**
+ * A comma-separated list, where SET-BUT-EMPTY is a value and not an absence.
+ *
+ * Deliberately not built on `str`, which folds `''` into `undefined`. That folding is right
+ * for a path or a model name — an empty string is not one — but it is wrong for a list whose
+ * empty case is the meaningful one: `BUNVIEW_TOOLS=` is how the README says to disable every
+ * built-in tool, and through `str` it fell back to the default allowlist instead. A fence
+ * documented as closable that no value of the variable could actually close.
+ *
+ * Exported for `config.test.ts`. `config` itself is computed once at import from whatever the
+ * environment held then, so the distinction this draws cannot be exercised through it.
+ */
+export const list = (key: string, fallback: string): string[] =>
+  (process.env[key] ?? fallback)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+
+/**
  * Which of the user's own settings files to load.
  *
  * Empty by default, and that is load-bearing rather than tidy. With the default (all
@@ -56,11 +74,26 @@ const settingSources = (str('BUNVIEW_SETTING_SOURCES') ?? '')
 /**
  * Where the credential mode starts.
  *
- * `BUNVIEW_ALLOW_API_KEY` is the variable this replaced. It is still honoured — but only in
- * the one direction that means something now. Someone who set it to `0` asked for the strip,
- * and silently ignoring a safety setting because it was renamed is precisely the "wrong
- * override, quietly" failure this project refuses elsewhere. `=1` needs no handling: it asked
- * for the behaviour that is now the default.
+ * `subscription`, because that is the premise of the app. A developer with `ANTHROPIC_API_KEY`
+ * exported for unrelated work should not find out afterwards that a scaffold advertising "runs
+ * on your plan" spent their card instead.
+ *
+ * The reason this can be a default at all — rather than the silent strip it used to be — is
+ * that the strip is now bounded in two places. Anthropic's terms for running Claude Code
+ * inside another product forbid the host removing, disabling or RESTRICTING an authentication
+ * method built into the binary, and both bounds exist to keep this on the right side of that:
+ *
+ *   * The header offers the switch in one click whenever a key is actually present, so the
+ *     key path is reachable rather than merely documented.
+ *   * `authStatus` in providers/claude.ts refuses to let the strip take someone's LAST
+ *     credential — it drops back to `auto` for a user whose only credential is that key,
+ *     instead of reporting them signed-out over a login the app itself hid.
+ *
+ * Take either of those away and this default becomes the thing the terms name.
+ *
+ * `BUNVIEW_ALLOW_API_KEY` is the variable this replaced. It is still honoured, in the one
+ * direction that now means something: `=1` asked for the key to be left alone, which is
+ * `auto`. `=0` asked for the strip, which is what happens anyway.
  */
 function credentialModeSeed(): 'auto' | 'subscription' {
   const explicit = str('BUNVIEW_CREDENTIAL_MODE')
@@ -68,21 +101,20 @@ function credentialModeSeed(): 'auto' | 'subscription' {
 
   if (explicit) {
     console.warn(
-      `✗ BUNVIEW_CREDENTIAL_MODE is not a mode: ${explicit}\n  Expected 'auto' or 'subscription'. Using 'auto'.`,
+      `✗ BUNVIEW_CREDENTIAL_MODE is not a mode: ${explicit}\n  Expected 'auto' or 'subscription'. Using 'subscription'.`,
     )
   }
 
-  const legacy = process.env.BUNVIEW_ALLOW_API_KEY
-  if (legacy !== undefined && !bool('BUNVIEW_ALLOW_API_KEY', true)) {
+  if (process.env.BUNVIEW_ALLOW_API_KEY !== undefined && bool('BUNVIEW_ALLOW_API_KEY', false)) {
     console.warn(
-      '! BUNVIEW_ALLOW_API_KEY is deprecated. Using BUNVIEW_CREDENTIAL_MODE=subscription,\n' +
-        '  which is the same behaviour. The default is now `auto`, and the app offers the\n' +
-        '  switch in its header instead of deciding for the user.',
+      '! BUNVIEW_ALLOW_API_KEY is deprecated. Using BUNVIEW_CREDENTIAL_MODE=auto, which is\n' +
+        '  the same behaviour. The default is now `subscription`, and the app offers the\n' +
+        '  switch in its header rather than deciding once at startup.',
     )
-    return 'subscription'
+    return 'auto'
   }
 
-  return 'auto'
+  return 'subscription'
 }
 
 /**
@@ -152,15 +184,15 @@ export const config = {
    *
    * `[]` disables every built-in tool, which is the right value for an app whose agent should
    * only ever touch app state through its own MCP tools. This scaffold keeps the three
-   * read-only ones so the example prompts have something to demonstrate.
+   * read-only ones so the example prompts have something to demonstrate. `BUNVIEW_TOOLS=` —
+   * set, empty — is how you get there, which is why this reads the variable through `list`
+   * rather than `str`: `str` treats empty as unset, so the one value that closes the fence
+   * silently reopened it to the default.
    *
    * Note this governs BUILT-IN tools only. The app's own `mcp__bunview__*` tools arrive via
    * `mcpServers` and are unaffected — emptying this list does not disarm them.
    */
-  tools: (str('BUNVIEW_TOOLS') ?? 'Read,Grep,Glob')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  tools: list('BUNVIEW_TOOLS', 'Read,Grep,Glob'),
 
   /**
    * Pre-approved, so no permission prompt can arise in a headless session that has no terminal
@@ -168,10 +200,7 @@ export const config = {
    *
    * The app's own MCP tools are here because they are ours and only touch app state.
    */
-  allowedTools: (str('BUNVIEW_ALLOWED_TOOLS') ?? 'Read,Grep,Glob,mcp__bunview__*')
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean),
+  allowedTools: list('BUNVIEW_ALLOWED_TOOLS', 'Read,Grep,Glob,mcp__bunview__*'),
 
   permissionMode,
   settingSources,
@@ -180,13 +209,13 @@ export const config = {
    * Seed for the credential mode; the live value lives in `credentials.ts` because the user
    * can change it from the header while the app is running.
    *
-   * `auto` — hand the CLI the environment as the user actually has it, and let the vendor's
-   * own precedence pick. This is the default because the terms for running Claude Code inside
-   * another product forbid the host removing an authentication method built into it, and an
-   * unconditional strip of `ANTHROPIC_API_KEY` is exactly that.
+   * `subscription` — strip the overrides so the plan is billed. The default; see
+   * `credentialModeSeed` above for why that is allowed to be a default and what bounds it.
    *
-   * `subscription` — strip the overrides so the plan is billed. Reachable in one click from
-   * the header whenever a key is actually present, which is the only time the choice is real.
+   * `auto` — hand the CLI the environment as the user actually has it and let the vendor's own
+   * precedence pick, which prefers a key when one is present. "Claude Code as published."
+   * Reachable in one click from the header whenever a key is actually there, which is the only
+   * time the choice is real.
    */
   credentialMode: credentialModeSeed(),
 

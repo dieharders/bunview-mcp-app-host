@@ -43,6 +43,20 @@ export interface ProviderAuth {
    * that a second provider would have to fake.
    */
   subscription: boolean
+  /**
+   * The provider's own name for the credential in play ('ANTHROPIC_API_KEY', 'apiKeyHelper',
+   * '/login managed key'), or null on a plain subscription login.
+   *
+   * Optional, and that is the point: it is what a provider CAN say about where a key came
+   * from, not something every provider must invent. Codex omits it rather than faking one.
+   *
+   * `subscription` above answers "is the plan paying"; this answers "and if not, from where" —
+   * which is the difference between a warning the user can act on and an amber badge with no
+   * named cause. A key from `apiKeyHelper` is invisible to `hadApiKeyOverride`, because it is
+   * in the user's Claude settings rather than the environment, so nothing else in the app can
+   * tell that case apart from an exported variable.
+   */
+  keySource?: string | null
 }
 
 export interface StreamOptions {

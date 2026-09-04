@@ -68,6 +68,26 @@ describe('readAuthStatus', () => {
     expect(readAuthStatus({ ...SUBSCRIPTION, apiKeySource: 'none' }).subscription).toBe(true)
   })
 
+  test('reports WHERE the key came from, because the advice differs by source', () => {
+    // `apiKeyOverride` only ever sees the environment, since the environment is the only thing
+    // childEnv can strip. Without this field a key from `apiKeyHelper` produced an amber
+    // "billed per token" badge with the switch hidden and no cause named anywhere on screen.
+    expect(readAuthStatus({ ...SUBSCRIPTION, apiKeySource: 'apiKeyHelper' }).keySource).toBe(
+      'apiKeyHelper',
+    )
+    expect(readAuthStatus({ ...SUBSCRIPTION, apiKeySource: 'ANTHROPIC_API_KEY' }).keySource).toBe(
+      'ANTHROPIC_API_KEY',
+    )
+  })
+
+  test('no key in front of the login reports no source at all', () => {
+    // Normalised to null rather than passed through, so the UI tests one field instead of also
+    // having to know that 'none' is a value and absent is another spelling of it.
+    expect(readAuthStatus(SUBSCRIPTION).keySource).toBeNull()
+    expect(readAuthStatus({ ...SUBSCRIPTION, apiKeySource: 'none' }).keySource).toBeNull()
+    expect(readAuthStatus({ loggedIn: false }).keySource).toBeNull()
+  })
+
   test('a third-party backend is not the subscription path', () => {
     // Bedrock/Vertex bill through the cloud provider. apiProvider is the field that moves.
     expect(readAuthStatus({ ...SUBSCRIPTION, apiProvider: 'bedrock' }).subscription).toBe(false)

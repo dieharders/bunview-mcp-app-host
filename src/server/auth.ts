@@ -33,9 +33,19 @@ export async function handleAuth(req: Request): Promise<Response> {
   // is one click from a sign-in that their own shell may quietly redirect. The mode rides
   // along so the header knows which way to offer the switch; `apiKeyOverride` decides whether
   // to offer it at all, since with no key present there is no second option to switch to.
+  //
+  // `keySource` rides along for the case `apiKeyOverride` cannot see: a key from `apiKeyHelper`
+  // or a managed `/login` key is in the user's Claude settings, not the environment, so the
+  // override flag is false and the switch stays hidden while the badge still says "billed per
+  // token". Naming the source is what turns that into a warning the user can act on.
+  //
+  // Read AFTER `provider.authStatus()`, never before: that call can move the mode, dropping
+  // back to `auto` for a user whose only credential is the key it would otherwise have
+  // stripped. Reading first would report `subscription` over a response proving otherwise.
   const env = {
     apiKeyOverride: hadApiKeyOverride(provider.id),
     credentialMode: getCredentialMode(),
+    keySource: auth.keySource ?? null,
   }
 
   if (auth.state === 'cli_missing') {

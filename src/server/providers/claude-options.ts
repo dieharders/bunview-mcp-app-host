@@ -45,8 +45,16 @@ export function buildOptions(
     effort: opts.effort as Options['effort'],
 
     // The one declared extra for this provider. `adaptive` lets Claude decide how much to
-    // reason; `off` skips it, which is cheaper and faster on simple turns. Omitted entirely
-    // rather than passed as adaptive when unset, so the CLI's own default stands.
+    // reason; `off` skips it, which is cheaper and faster on simple turns; `default` omits the
+    // field so the CLI's own default stands.
+    //
+    // That third branch is the DEFAULT and it used to be dead code. `coerceSettings` fills
+    // every declared setting with its default rather than leaving it absent, and the default
+    // was `adaptive` — so this sent `thinking: {type:'adaptive'}` on every turn while reading
+    // as if it only did so on request. Adaptive is Opus 4.6+ (`ThinkingAdaptive` in the SDK
+    // types) AND is already what those models do without being asked, so the explicit send
+    // bought nothing on Opus and aimed an unsupported option at haiku. `default` now leads the
+    // values list in shared/events.ts, which is what makes falling through here reachable.
     ...(opts.settings.thinking === 'off'
       ? { thinking: { type: 'disabled' as const } }
       : opts.settings.thinking === 'adaptive'

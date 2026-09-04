@@ -218,6 +218,38 @@ export const config = {
   codexSandbox: choice('BUNVIEW_CODEX_SANDBOX', SANDBOX_MODES, 'read-only'),
 
   /**
+   * Whether to turn on Codex's Windows sandbox backend. ON by default, on Windows only.
+   *
+   * This is the flag that makes the paragraph above a footnote rather than a wall. Codex's
+   * Windows sandbox is still behind a vendor feature flag in 0.153, and WITHOUT it there is no
+   * mechanism to run a sandboxed command inside — so rather than run the command unsandboxed,
+   * Codex does not run it at all. That is the whole bug: on the same machine, through the same
+   * app, Claude reads a file and Codex reports that PowerShell must not be installed.
+   *
+   * Verified against codex-cli 0.153.0 via `codex debug prompt-input`, which renders the
+   * model-visible permission profile without needing auth: with `sandbox_mode="workspace-write"`
+   * and this flag OFF, the profile degrades silently to the same read-only shape as
+   * `sandbox_mode="read-only"`. With it ON, real `access="write"` entries appear. The flag is
+   * what supplies enforcement; the mode only says what to enforce.
+   *
+   * WHAT THIS DOES NOT FENCE, because the profile handed to the model overstates it. There are
+   * three backends — `disabled`, `restricted-token` and `elevated` — and the binary is explicit
+   * that "Restricted read-only access requires the elevated Windows sandbox backend". The
+   * default `restricted-token` backend constrains WRITES via capability SIDs and does not
+   * confine reads, yet the `<permission_profile>` in the prompt claims `access="read"` on the
+   * workspace root either way. So under the default backend that read scope is guidance to the
+   * model, not a boundary. Sandboxing Codex's reads on Windows needs the elevated backend and
+   * its one-time privileged setup step (`codex-windows-sandbox-setup.exe`), which this app does
+   * not drive.
+   *
+   * On by default anyway, because the alternative route to a working Codex is
+   * `BUNVIEW_CODEX_SANDBOX=danger-full-access`, which turns the sandbox off entirely and drops
+   * the write fence too. This keeps the strictly better half. Set `0` to opt out and get the
+   * old behaviour back.
+   */
+  codexWindowsSandbox: bool('BUNVIEW_CODEX_WINDOWS_SANDBOX', process.platform === 'win32'),
+
+  /**
    * The base set of built-in tools that EXIST for this session. The real fence.
    *
    * This replaced a `disallowedTools` denylist, and the difference is the whole point. The

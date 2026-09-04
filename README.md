@@ -217,6 +217,7 @@ Read-only.
 | `BUNVIEW_SETTING_SOURCES`              | _(empty)_                        | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers     |
 | `BUNVIEW_CWD`                          | `homedir()`                      | Session bucket, and the only directory the file tools can reach       |
 | `BUNVIEW_MODEL`                        | _(CLI default)_                  | Claude only. Also selectable per-message in the UI                    |
+| `BUNVIEW_CODEX_SANDBOX`                | `read-only`                      | Codex only. `workspace-write` / `danger-full-access`. See below       |
 | `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                   | Explicit path to the Claude binary                                    |
 | `BUNVIEW_CODEX_PATH`                   | _(discovered)_                   | Explicit path to the Codex binary                                     |
 | `BUNVIEW_ALLOW_INSTALL`                | `1`                              | Offer to install a missing CLI. Set `0` for managed/offline builds    |
@@ -249,6 +250,19 @@ BUNVIEW_TOOLS="Read,Grep,Glob,WebFetch" \
 BUNVIEW_ALLOWED_TOOLS="Read,Grep,Glob,WebFetch,mcp__bunview__*" \
 bun run dev
 ```
+
+### Codex on Windows cannot read anything under the default sandbox
+
+- **Claude** uses in-process tools. `BUNVIEW_TOOLS=Read,Grep,Glob` needs no shell at all.
+- **Codex** has no in-process file tools. Every read it performs is a shell command, and on Windows that shell is PowerShell (`pwsh.exe`, then `powershell.exe`, off PATH).
+
+Under any `sandbox_mode` but `danger-full-access`, that command has to run inside Codex's own sandbox — and on Windows the sandbox is still behind a vendor feature flag (`experimental_windows_sandbox`, with a `codex-windows-sandbox-setup.exe` helper shipped next to the binary).
+
+```bash
+BUNVIEW_CODEX_SANDBOX=danger-full-access bun run dev
+```
+
+`read-only` stays the default. macOS and Linux have a working sandbox and need none of this.
 
 ## Architecture notes
 

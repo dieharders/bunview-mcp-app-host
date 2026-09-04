@@ -17,6 +17,7 @@
  * `--sandbox` specifically, but about the two forms never again diverging on flags.
  */
 import { describe, expect, test } from 'bun:test'
+import { config } from '../config'
 import { buildArgs } from './codex'
 import type { StreamOptions } from './types'
 
@@ -62,10 +63,13 @@ describe('codex buildArgs', () => {
     expect(flagsOf(build({ sessionId: 'SID' }))).toEqual(flagsOf(build()))
   })
 
-  test('still asks for the read-only sandbox, via config rather than the flag', () => {
+  test('states the sandbox explicitly, via config rather than the flag', () => {
     // The posture must survive the fix. `-c` is accepted by both forms; `--sandbox` is not.
+    // The MODE now comes from config — Windows cannot run a sandboxed shell, so a hardcoded
+    // value left those users with no way to make Codex read a file — but it is always SENT,
+    // so a future change to the vendor's own default cannot silently widen this.
     for (const args of [build(), build({ sessionId: 'SID' })]) {
-      expect(args).toContain('sandbox_mode="read-only"')
+      expect(args).toContain(`sandbox_mode="${config.codexSandbox}"`)
     }
   })
 

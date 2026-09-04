@@ -12,6 +12,13 @@
  *     file edits, web search and any MCP server the user has configured all work, and are
  *     mapped to tool chips below.
  *
+ *     "All work" carries a Windows asterisk that this file used to state too confidently.
+ *     Codex has no in-process file tools; every read is a shell command, and on Windows that
+ *     shell is PowerShell. Under any sandbox but `danger-full-access` it must run inside
+ *     Codex's sandbox, which on Windows is still behind a vendor feature flag — so it does not
+ *     run, and the model reports it as PowerShell being missing or a file system policy
+ *     blocking the directory. `BUNVIEW_CODEX_SANDBOX` is the way out; see config.ts.
+ *
  *     The reason ours are missing is the registration channel, not the tools. The Claude Agent
  *     SDK has a bidirectional control protocol over the same stdio stream it uses to drive the
  *     CLI: `createSdkMcpServer` registers a tool for that session only, and when the model
@@ -189,9 +196,11 @@ export function buildArgs(argv: string[], opts: StreamOptions): string[] {
 
   const flags = ['--json', '--skip-git-repo-check']
 
-  // Read-only sandbox, matching the Claude provider's posture. Stated explicitly rather than
-  // relying on Codex's default so a future default change cannot silently widen it.
-  flags.push('-c', `sandbox_mode=${toml('read-only')}`)
+  // The sandbox Codex runs its own shell commands under. Stated explicitly rather than relying
+  // on Codex's default so a future default change cannot silently widen it — but read from
+  // config rather than hardcoded, because on Windows the safe value costs Codex its only way of
+  // reading a file at all. See `codexSandbox` in config.ts for what that failure looks like.
+  flags.push('-c', `sandbox_mode=${toml(config.codexSandbox)}`)
   flags.push('-c', `model_reasoning_effort=${toml(opts.effort)}`)
 
   // Declared extras. Read by id; `chat.ts` has already coerced them against this provider's

@@ -1,6 +1,6 @@
 {
   "name": "bunview-mcp-app-host",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "type": "module",
   "description": "Bun + WebView desktop app scaffold that hosts MCP tools on a Claude Code / Codex subscription.",

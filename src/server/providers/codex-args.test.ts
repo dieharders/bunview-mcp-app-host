@@ -17,6 +17,7 @@
  * `--sandbox` specifically, but about the two forms never again diverging on flags.
  */
 import { describe, expect, test } from 'bun:test'
+import { config } from '../config'
 import { buildArgs } from './codex'
 import type { StreamOptions } from './types'
 
@@ -62,10 +63,13 @@ describe('codex buildArgs', () => {
     expect(flagsOf(build({ sessionId: 'SID' }))).toEqual(flagsOf(build()))
   })
 
-  test('still asks for the read-only sandbox, via config rather than the flag', () => {
+  test('states the sandbox explicitly, via config rather than the flag', () => {
     // The posture must survive the fix. `-c` is accepted by both forms; `--sandbox` is not.
+    // The MODE now comes from config — Windows cannot run a sandboxed shell, so a hardcoded
+    // value left those users with no way to make Codex read a file — but it is always SENT,
+    // so a future change to the vendor's own default cannot silently widen this.
     for (const args of [build(), build({ sessionId: 'SID' })]) {
-      expect(args).toContain('sandbox_mode="read-only"')
+      expect(args).toContain(`sandbox_mode="${config.codexSandbox}"`)
     }
   })
 
@@ -79,13 +83,23 @@ describe('codex buildArgs', () => {
     expect(args).toContain('model_reasoning_summary="concise"')
   })
 
-  test('TOML-quotes every config value', () => {
-    // `-c` parses its value as TOML and only falls back to a raw string. An unquoted value
-    // works by accident until one looks like a number or a bare keyword.
+  test('every config value is valid TOML for the type its key takes', () => {
+    // `-c` parses its value as TOML and only falls back to a raw string. An unquoted string
+    // works by accident until one looks like a number or a bare keyword — hence the quotes.
+    // A BOOLEAN key is the other way round: `features.…=true` is the boolean, and `"true"`
+    // would be a string the vendor has to reject.
     for (const [i, arg] of build().entries()) {
       if (arg !== '-c') continue
-      expect(build()[i + 1]).toMatch(/^[a-z_]+="[^"]*"$/)
+      expect(build()[i + 1]).toMatch(/^[a-z_]+(?:\.[a-z_]+)*=(?:"[^"]*"|true|false)$/)
     }
+  })
+
+  test('enables the Windows sandbox backend exactly when config asks for it', () => {
+    // The parity fix: on Windows this is what lets Codex read a file at all, which the Claude
+    // provider on the same machine could already do. Asserted against config rather than a
+    // hardcoded true so this test means the same thing on every platform in CI.
+    const present = build().includes('features.experimental_windows_sandbox=true')
+    expect(present).toBe(config.codexWindowsSandbox)
   })
 
   test('omits --model for the default, so the vendor picks', () => {

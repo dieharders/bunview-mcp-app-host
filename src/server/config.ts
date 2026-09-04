@@ -53,6 +53,25 @@ export const list = (key: string, fallback: string): string[] =>
     .filter(Boolean)
 
 /**
+ * One value out of a fixed set, warning rather than silently falling back.
+ *
+ * Exported for `config.test.ts` for the same reason as `list`: `config` is computed once at
+ * import from whatever the environment held then, so the rejection path cannot be reached
+ * through it.
+ */
+export const choice = <T extends string>(key: string, allowed: readonly T[], fallback: T): T => {
+  const v = str(key)
+  if (v === undefined) return fallback
+  if ((allowed as readonly string[]).includes(v)) return v as T
+  console.warn(`✗ ${key} is not one of ${allowed.join(', ')}: ${v}\n  Using '${fallback}'.`)
+  return fallback
+}
+
+/** `sandbox_mode`'s documented set, in Codex's own order of increasing reach. */
+export const SANDBOX_MODES = ['read-only', 'workspace-write', 'danger-full-access'] as const
+export type SandboxMode = (typeof SANDBOX_MODES)[number]
+
+/**
  * Which of the user's own settings files to load.
  *
  * Empty by default, and that is load-bearing rather than tidy. With the default (all
@@ -170,6 +189,65 @@ export const config = {
 
   /** Default model when the request does not name one. Undefined = the CLI's own default. */
   model: str('BUNVIEW_MODEL'),
+
+  /**
+   * The sandbox Codex runs its OWN shell commands under.
+   *
+   * A knob rather than the literal it used to be, because the safe end of this axis is not
+   * reachable on every platform and a hardcoded value gave the user no way past that.
+   *
+   * WHAT GOES WRONG ON WINDOWS. Codex has no in-process file tools the way Claude Code does —
+   * every read it performs is a shell command, and on Windows that shell is PowerShell
+   * (`pwsh.exe`, then `powershell.exe`, both resolved off PATH). Under a sandbox mode other
+   * than `danger-full-access` that command has to run inside Codex's sandbox, and on Windows
+   * that sandbox is still behind a vendor feature flag — `experimental_windows_sandbox`, with
+   * its own `codex-windows-sandbox-setup.exe` helper shipped alongside the binary. So the
+   * command does not run, and the model reports the failure in the two shapes it can see from
+   * the inside: that PowerShell must not be installed, and that "the environment's file system
+   * policy" blocked it.
+   *
+   * This is why the same machine can list a directory through the Claude provider and not
+   * through this one. Nothing about the machine differs; `tools: Read,Grep,Glob` needs no
+   * shell, and a sandboxed shell command needs one.
+   *
+   * `read-only` remains the DEFAULT, on the same principle as everything else in this file:
+   * widening is one deliberate edit, not a quiet accommodation. A Windows user who wants
+   * Codex's shell to work sets `BUNVIEW_CODEX_SANDBOX=danger-full-access` and knows what they
+   * bought — the name is the vendor's, and it is accurate.
+   */
+  codexSandbox: choice('BUNVIEW_CODEX_SANDBOX', SANDBOX_MODES, 'read-only'),
+
+  /**
+   * Whether to turn on Codex's Windows sandbox backend. ON by default, on Windows only.
+   *
+   * This is the flag that makes the paragraph above a footnote rather than a wall. Codex's
+   * Windows sandbox is still behind a vendor feature flag in 0.153, and WITHOUT it there is no
+   * mechanism to run a sandboxed command inside — so rather than run the command unsandboxed,
+   * Codex does not run it at all. That is the whole bug: on the same machine, through the same
+   * app, Claude reads a file and Codex reports that PowerShell must not be installed.
+   *
+   * Verified against codex-cli 0.153.0 via `codex debug prompt-input`, which renders the
+   * model-visible permission profile without needing auth: with `sandbox_mode="workspace-write"`
+   * and this flag OFF, the profile degrades silently to the same read-only shape as
+   * `sandbox_mode="read-only"`. With it ON, real `access="write"` entries appear. The flag is
+   * what supplies enforcement; the mode only says what to enforce.
+   *
+   * WHAT THIS DOES NOT FENCE, because the profile handed to the model overstates it. There are
+   * three backends — `disabled`, `restricted-token` and `elevated` — and the binary is explicit
+   * that "Restricted read-only access requires the elevated Windows sandbox backend". The
+   * default `restricted-token` backend constrains WRITES via capability SIDs and does not
+   * confine reads, yet the `<permission_profile>` in the prompt claims `access="read"` on the
+   * workspace root either way. So under the default backend that read scope is guidance to the
+   * model, not a boundary. Sandboxing Codex's reads on Windows needs the elevated backend and
+   * its one-time privileged setup step (`codex-windows-sandbox-setup.exe`), which this app does
+   * not drive.
+   *
+   * On by default anyway, because the alternative route to a working Codex is
+   * `BUNVIEW_CODEX_SANDBOX=danger-full-access`, which turns the sandbox off entirely and drops
+   * the write fence too. This keeps the strictly better half. Set `0` to opt out and get the
+   * old behaviour back.
+   */
+  codexWindowsSandbox: bool('BUNVIEW_CODEX_WINDOWS_SANDBOX', process.platform === 'win32'),
 
   /**
    * The base set of built-in tools that EXIST for this session. The real fence.

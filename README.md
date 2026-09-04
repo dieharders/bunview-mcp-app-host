@@ -217,6 +217,8 @@ Read-only.
 | `BUNVIEW_SETTING_SOURCES`              | _(empty)_                        | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers     |
 | `BUNVIEW_CWD`                          | `homedir()`                      | Session bucket, and the only directory the file tools can reach       |
 | `BUNVIEW_MODEL`                        | _(CLI default)_                  | Claude only. Also selectable per-message in the UI                    |
+| `BUNVIEW_CODEX_SANDBOX`                | `read-only`                      | Codex only. `workspace-write` / `danger-full-access`. See below       |
+| `BUNVIEW_CODEX_WINDOWS_SANDBOX`        | `1` on win32                     | Codex only. Makes its Windows sandbox real. `0` = old behaviour       |
 | `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                   | Explicit path to the Claude binary                                    |
 | `BUNVIEW_CODEX_PATH`                   | _(discovered)_                   | Explicit path to the Codex binary                                     |
 | `BUNVIEW_ALLOW_INSTALL`                | `1`                              | Offer to install a missing CLI. Set `0` for managed/offline builds    |
@@ -249,6 +251,24 @@ BUNVIEW_TOOLS="Read,Grep,Glob,WebFetch" \
 BUNVIEW_ALLOWED_TOOLS="Read,Grep,Glob,WebFetch,mcp__bunview__*" \
 bun run dev
 ```
+
+### Codex on Windows
+
+- **Claude** uses in-process tools. `BUNVIEW_TOOLS=Read,Grep,Glob` needs no shell at all.
+- **Codex** has no in-process file tools. Every read it performs is a shell command, and on Windows that shell is PowerShell (`pwsh.exe`, then `powershell.exe`, off PATH).
+
+That command has to run inside Codex's sandbox, and on Windows the sandbox is behind a vendor feature flag (`experimental_windows_sandbox`). Without it there is nothing to run the command inside, and Codex won't run it unsandboxed — so it doesn't run, and the model reports that PowerShell must not be installed or that a file system policy blocked the directory. `BUNVIEW_CODEX_WINDOWS_SANDBOX` sets the flag, on by default for win32, so both providers read files out of the box.
+
+Visible without auth, via Codex's own prompt renderer — flag off, `workspace-write` degrades silently to the read-only profile; flag on, real `access="write"` entries appear:
+
+```bash
+codex debug prompt-input -c 'sandbox_mode="workspace-write"' hi
+codex debug prompt-input --enable experimental_windows_sandbox -c 'sandbox_mode="workspace-write"' hi
+```
+
+**It fences writes, not reads.** Of Codex's three Windows backends (`disabled`, `restricted-token`, `elevated`), the binary is explicit that _"Restricted read-only access requires the elevated Windows sandbox backend"_. The default `restricted-token` backend constrains writes via capability SIDs and does not confine reads — yet the `<permission_profile>` in the prompt claims `access="read"` on the workspace root either way, so that read scope is guidance to the model, not a boundary. Confining reads needs the elevated backend and its one-time privileged setup (`codex-windows-sandbox-setup.exe`), which this app does not drive.
+
+On by default anyway because the only other route to a working Codex is `BUNVIEW_CODEX_SANDBOX=danger-full-access`, which drops the sandbox entirely and the write fence with it. `BUNVIEW_CODEX_WINDOWS_SANDBOX=0` restores the old behaviour. macOS and Linux need none of this.
 
 ## Architecture notes
 

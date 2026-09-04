@@ -140,16 +140,28 @@ export function SetupBanner({
           </>
         )}
 
-        {/* The one thing this app cannot fix for the user. It strips these before spawning any
-            CLI itself, but the sign-in window is their own login shell — so a sign-in can
-            quietly resolve against the key and leave this banner saying "not signed in"
-            forever, with nothing on screen explaining why. */}
+        {/* The one thing this app cannot fix for the user. Whatever the mode, the sign-in
+            window is their own login shell — so a sign-in can quietly resolve against the key
+            and leave this banner saying "not signed in" forever, with nothing on screen
+            explaining why. The copy splits on mode because the two situations need different
+            advice: one is "your plan is safe but sign-in may no-op", the other is "you are
+            about to be billed per token". */}
         {auth.apiKeyOverride && (
           <p className="mt-1.5">
-            <Code>ANTHROPIC_API_KEY</Code> is set in your environment. BunView strips it from the
-            CLI it runs, so your subscription is what gets billed — but the sign-in window is your
-            own shell, where it still applies, and {info.label} may report you as already signed in
-            there. Unset it in that window if signing in doesn’t stick.
+            <Code>ANTHROPIC_API_KEY</Code> is set in your environment.{' '}
+            {auth.credentialMode === 'subscription' ? (
+              <>
+                BunView is ignoring it, so your subscription is what gets billed — but the sign-in
+                window is your own shell, where it still applies, and {info.label} may report you as
+                already signed in there. Unset it in that window if signing in doesn’t stick.
+              </>
+            ) : (
+              <>
+                {info.label} prefers it over your subscription, so usage will be billed per token.
+                Choose <strong>Use my plan</strong> in the header to ignore it, or unset it in your
+                shell.
+              </>
+            )}
           </p>
         )}
 

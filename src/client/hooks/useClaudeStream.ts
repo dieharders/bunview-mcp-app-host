@@ -122,6 +122,7 @@ export function useClaudeStream() {
       prompt: string,
       model: ModelChoice = DEFAULT_MODEL,
       effort: EffortChoice = DEFAULT_EFFORT,
+      settings: Record<string, string> = {},
     ) => {
       const trimmed = prompt.trim()
       if (!trimmed || abortRef.current) return
@@ -140,7 +141,7 @@ export function useClaudeStream() {
       const run = async () => {
         try {
           for await (const event of openChatStream(
-            { provider, prompt: trimmed, sessionId: sessionRef.current, model, effort },
+            { provider, prompt: trimmed, sessionId: sessionRef.current, model, effort, settings },
             ac.signal,
           )) {
             switch (event.type) {

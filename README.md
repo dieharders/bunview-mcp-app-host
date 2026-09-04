@@ -1,8 +1,56 @@
 # BunView — A desktop MCP app host using your Claude/ChatGPT subscription
 
-A minimal desktop scaffold for a native app to connect a user's chatGPT/Claude subscription plan.
+A minimal desktop scaffold for a native app to connect a user's chatGPT/Claude subscription plan. It is a starting point for your own AI apps.
 
-Features:
+<div align="center">
+
+![Bun](https://img.shields.io/badge/-Bun-000?&logo=bun)
+![TypeScript](https://img.shields.io/badge/-TypeScript-000?&logo=TypeScript)
+![React](https://img.shields.io/badge/-React-000?&logo=React)
+![Tailwind](https://img.shields.io/badge/-Tailwind-000?&logo=tailwindcss)
+<br/>
+![Anthropic](https://img.shields.io/badge/-Claude%20Code-000?&logo=anthropic)
+![Codex](https://custom-icon-badges.demolab.com/badge/-Codex-000?logo=openai)
+![MIT](https://img.shields.io/badge/license-MIT-000)
+
+</div>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/connect.png" alt="BunView — connect your AI plan" /></td>
+    <td width="50%"><img src="docs/app.png" alt="BunView — chat with live app state written by MCP tools" /></td>
+  </tr>
+  <tr>
+    <td align="center"><em>Pick the plan to run on.</em></td>
+    <td align="center"><em>The agent writes the right-hand panel through the app's own MCP tools.</em></td>
+  </tr>
+</table>
+
+## Table of Contents
+
+- [Features](#features)
+- [Quickstart](#quickstart)
+- [How it works](#how-it-works)
+- [Quick Guide Map](#quick-guide-map)
+- [Providers](#providers)
+- [Prerequisites](#prerequisites)
+- [How the agent connection works](#how-the-agent-connection-works)
+  - [Prevent accidental API usage](#prevent-accidental-api-usage)
+- [MCP: App as the host](#mcp-app-as-the-host)
+- [Forking](#forking)
+  - [Tools](#tools)
+  - [Naming](#naming)
+- [Safety defaults](#safety-defaults)
+  - [Widening permissions scope](#widening-permissions-scope)
+- [Architecture notes](#architecture-notes)
+- [Onboarding: Installing agent cli and auth flow](#onboarding-installing-agent-cli-and-auth-flow)
+- [Adding a provider](#adding-a-provider)
+- [Build](#build)
+  - [How to bundle agent deps instead](#how-to-bundle-agent-deps-instead)
+- [Frontend fallback](#frontend-fallback)
+- [License](#license)
+
+## Features
 
 - Native app executable
 - Bun server
@@ -11,8 +59,6 @@ Features:
 - Example MCP tool use
 - Example prompt/response implementation
 - Pick AI model/effort parameters
-
-It is a starting point for your own purposes.
 
 ## Quickstart
 
@@ -41,6 +87,7 @@ Try: **“Set the app status to hello and add a note.”** The panel updates as 
 │ native window (webview)  │◄──────►│ Bun.serve  ─ POST /api/chat  (SSE)  │
 │ webview.run() blocks     │  port  │            ─ GET  /api/auth         │
 └──────────────────────────┘        │            ─ GET  /api/state        │
+                                    │            ─ POST /api/credentials  │
                                     │            ─ /*  bundled React app  │
                                     └───────────────┬─────────────────────┘
                                                     │ Agent SDK
@@ -58,13 +105,7 @@ Try: **“Set the app status to hello and add a note.”** The panel updates as 
 | Streaming       | token by token   | **per message**               |
 | App's MCP tools | yes, in-process  | **no**                        |
 
-Codex still requires testing and validation.
-
-> The Codex provider is written against OpenAI's published CLI reference and has **not** been
-> exercised against a real `codex` install. Its event mapping is deliberately tolerant, so an
-> unverified field name degrades to "no event" rather than a crash — but treat it as untested.
-
-**Note** Codex's own tools work fine. What is missing is _BunView's_ tools, the reason is the registration channel. The Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no channel to answer on.
+**Note** What is missing is _BunView's_ tools, the reason is the registration channel. The Claude Agent SDK has a bidirectional control protocol over the same stdio stream it uses to drive the CLI, so `createSdkMcpServer` registers a tool **for one session only** and the handler runs in this process. `codex exec --json` is one-way — prompt in, JSONL out — with no channel to answer on.
 
 It is still doable: Codex reads MCP servers from `~/.codex/config.toml`, and a `url` entry there uses streamable HTTP, so BunView could serve `POST /mcp` from the Bun server it already runs and keep the tools in-process after all. The costs are what stopped it — it writes to the user's **global** config rather than being scoped to a session, it currently needs `experimental_use_rmcp_client = true`, and it means implementing the MCP wire protocol rather than calling a helper.
 
@@ -86,13 +127,20 @@ Desktop only. The whole design spawns a local process, which is not supported on
 
 ### Prevent accidental API usage
 
-If `ANTHROPIC_API_KEY` is set in the environment, the CLI will prefer it and bills API credits instead. So [`src/server/env.ts`](src/server/env.ts) strips it (and `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL`, the Bedrock/Vertex switches) from the child environment. Set `BUNVIEW_ALLOW_API_KEY=1` to opt back in deliberately.
+If `ANTHROPIC_API_KEY` is set in the environment, the CLI prefers it and bills API credits instead of your plan. BunView **defaults to your plan** and makes the other choice visible rather than hidden:
 
-`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`, `codex login status`) and reports which credential is actually in play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key — usage is billed per token”_ when it is not.
+- **Default `subscription`.** [`src/server/env.ts`](src/server/env.ts) strips `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_BASE_URL` and the Bedrock/Vertex switches from the CLIs BunView spawns, so a key you exported for unrelated work does not quietly spend your card here.
+- The badge reports which credential is actually used — from the CLI's own `apiKeySource`, not from a guess.
+- When a key is present, the header offers **Use my plan** / **Use API key**. With no key present the switch is hidden, because there is no second option.
+- `BUNVIEW_CREDENTIAL_MODE=auto` starts in pass-through mode, which is the binary's own precedence.
 
-## MCP: App as the host
+**Why the default is bounded.** Anthropic's [terms](https://code.claude.com/docs/en/legal-and-compliance) for running Claude Code inside another product require that the binary run as published and that the host not "remove, disable, or restrict any authentication method built into it.
 
-MCP only carries **tools**. It has no concept of a conversation, a model or a subscription, so it always needs a host that already has a model attached. This app acts as the host. The app registers its _own_ MCP server into the agent session, so the agent can call tools that change the app's live state.
+`GET /api/auth?provider=<id>` shells the vendor's status command (`claude auth status --json`, `codex login status`) and reports which credential is actually in play, so the badge says _“Claude max · you@example.com”_ on a subscription and warns _“API key — usage is billed per token”_ when it is not. When that key came from `apiKeyHelper` or a managed `/login` key — settings BunView cannot reach, so no switch is offered — the badge tooltip names the source, since the fix is in your Claude settings rather than in this app.
+
+## MCP: The App is the host
+
+This app is an MCP **host**, and it registers its _own_ MCP server into the agent session so the agent can call tools that change the app's live state.
 
 [`src/server/mcp/app-tools.ts`](src/server/mcp/app-tools.ts):
 
@@ -108,7 +156,7 @@ export const appToolsServer = createSdkMcpServer({
 
 `createSdkMcpServer` runs these **in this process**. The handlers close over [`src/server/state.ts`](src/server/state.ts), so a tool call mutates the same object the UI is rendering. A stdio MCP server would instead put a process boundary between the agent's tools and your app's state; an HTTP one keeps them together but means implementing the wire protocol and registering it globally.
 
-## Forking:
+## Forking
 
 ### Tools
 
@@ -128,7 +176,7 @@ The BunView name is carried across code, build config and CI.
       name from `APP_NAME` and probes for `${DISPLAY_NAME}-macos.app` on line 60.
 - [ ] **MCP server name** — [`app-tools.ts:27`](src/server/mcp/app-tools.ts#L27) `name: 'bunview'`
       **and** the `mcp__bunview__*` glob in `BUNVIEW_ALLOWED_TOOLS` at
-      [`config.ts:93`](src/server/config.ts#L93). Tool IDs are built from that name, so changing
+      [`config.ts:171`](src/server/config.ts#L171). Tool IDs are built from that name, so changing
       one side alone means every call to your own tools is silently denied.
 - [ ] **localStorage key** — `PROVIDER_KEY` in
       [`Chat.tsx:22`](src/client/components/Chat.tsx#L22) **and** the same literal in
@@ -161,26 +209,26 @@ The BunView name is carried across code, build config and CI.
 
 Read-only.
 
-| Env var                                | Default                                           | Effect                                                             |
-| -------------------------------------- | ------------------------------------------------- | ------------------------------------------------------------------ |
-| `BUNVIEW_ALLOWED_TOOLS`                | `Read,Grep,Glob,mcp__bunview__*`                  | Pre-approved, so no prompt can arise in a headless session         |
-| `BUNVIEW_DISALLOWED_TOOLS`             | `Bash,Write,Edit,NotebookEdit,WebFetch,WebSearch` | The actual fence                                                   |
-| `BUNVIEW_PERMISSION_MODE`              | `default`                                         | `bypassPermissions` additionally requires `BUNVIEW_ALLOW_BYPASS=1` |
-| `BUNVIEW_SETTING_SOURCES`              | _(empty)_                                         | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers  |
-| `BUNVIEW_CWD`                          | `homedir()`                                       | Session bucket, and the only directory the file tools can reach    |
-| `BUNVIEW_MODEL`                        | _(CLI default)_                                   | Also selectable per-message in the UI                              |
-| `BUNVIEW_EFFORT`                       | `low`                                             | Session-scoped; never written to your config                       |
-| `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                                    | Explicit path to the Claude binary                                 |
-| `BUNVIEW_CODEX_PATH`                   | _(discovered)_                                    | Explicit path to the Codex binary                                  |
-| `BUNVIEW_ALLOW_INSTALL`                | `1`                                               | Offer to install a missing CLI. Set `0` for managed/offline builds |
-| `BUNVIEW_ALLOW_API_KEY`                | `0`                                               | Stop stripping `ANTHROPIC_API_KEY`                                 |
-| `BUNVIEW_STALL_MS` / `BUNVIEW_WALL_MS` | `120000` / `600000`                               | Silence cap / total cap                                            |
-| `BUNVIEW_PORT`                         | `0`                                               | `0` = ephemeral                                                    |
+| Env var                                | Default                          | Effect                                                                |
+| -------------------------------------- | -------------------------------- | --------------------------------------------------------------------- |
+| `BUNVIEW_TOOLS`                        | `Read,Grep,Glob`                 | **The fence.** Built-in tools that exist at all; set-but-empty = none |
+| `BUNVIEW_ALLOWED_TOOLS`                | `Read,Grep,Glob,mcp__bunview__*` | Pre-approved, so no prompt can arise in a headless session            |
+| `BUNVIEW_PERMISSION_MODE`              | `dontAsk`                        | `bypassPermissions` additionally requires `BUNVIEW_ALLOW_BYPASS=1`    |
+| `BUNVIEW_SETTING_SOURCES`              | _(empty)_                        | Do not inherit the user's CLAUDE.md, skills, hooks or MCP servers     |
+| `BUNVIEW_CWD`                          | `homedir()`                      | Session bucket, and the only directory the file tools can reach       |
+| `BUNVIEW_MODEL`                        | _(CLI default)_                  | Claude only. Also selectable per-message in the UI                    |
+| `BUNVIEW_CLAUDE_PATH`                  | _(discovered)_                   | Explicit path to the Claude binary                                    |
+| `BUNVIEW_CODEX_PATH`                   | _(discovered)_                   | Explicit path to the Codex binary                                     |
+| `BUNVIEW_ALLOW_INSTALL`                | `1`                              | Offer to install a missing CLI. Set `0` for managed/offline builds    |
+| `BUNVIEW_CREDENTIAL_MODE`              | `subscription`                   | `auto` lets the CLI prefer `ANTHROPIC_API_KEY`. Switchable in the UI  |
+| `BUNVIEW_STALL_MS` / `BUNVIEW_WALL_MS` | `120000` / `600000`              | Silence cap / total cap                                               |
+| `BUNVIEW_PORT`                         | `0`                              | `0` = ephemeral                                                       |
 
-Two things are worth knowing about the defaults:
+Three things are worth knowing about the defaults:
 
 - **`settingSources: []` is not tidiness.** With the default, the session inherits every MCP server in the user's `~/.claude.json`. On a working developer machine that can mean Gmail, Drive and Calendar.
-- **The fence is built from typed SDK options, not a raw CLI flag.** `disallowedTools` plus a deny-by-default `canUseTool` removes the tools that run commands or code; the CLI confines file tools to `cwd` unless something passes `--add-dir`, which nothing here does; `settingSources: []` ignores user/project/local settings; and `bypassPermissions` is refused at startup unless `BUNVIEW_ALLOW_BYPASS=1` is set alongside it. An earlier version also passed `--restricted`, which this CLI does not have — an unknown flag is fatal, so it broke every turn. Prefer typed options over `extraArgs`: that is unchecked passthrough to a binary this app does not version-pin.
+- **`tools` is an allowlist, and `allowedTools` is not a fence.** They read alike and do opposite jobs. The SDK's own doc comment is explicit: `allowedTools` is "tool names that are auto-allowed without prompting… **To restrict which tools are available, use the `tools` option instead.**" So `tools` is what makes Bash, Write and Edit _absent_ — which also means a tool added by a future CLI release is excluded automatically, where a denylist would have permitted it until someone noticed. `mcp__bunview__*` arrives through `mcpServers` and is unaffected, so even `BUNVIEW_TOOLS=` leaves the app's own tools working.
+- **The fence is built from typed SDK options, not a raw CLI flag.** `tools` removes the tools that run commands or code; `permissionMode: 'dontAsk'` denies anything unlisted instead of prompting into a window with nowhere to show a prompt; `canUseTool` backstops the rest; the CLI confines file tools to `cwd` unless something passes `--add-dir`, which nothing here does; `settingSources: []` ignores user/project/local settings; and `bypassPermissions` is refused at startup unless `BUNVIEW_ALLOW_BYPASS=1` is set alongside it. Prefer typed options over `extraArgs`: that is unchecked passthrough to a binary this app does not version-pin.
 
 **Never add `--bare`.** otherwise the sdk will use `ANTHROPIC_API_KEY` and bill based on API usage instead.
 
@@ -189,12 +237,18 @@ Two things are worth knowing about the defaults:
 If your app needs to read a project directory:
 
 ```bash
-BUNVIEW_ALLOWED_TOOLS="Read,Grep,Glob,mcp__bunview__*" \
-BUNVIEW_CWD="/path/to/project" \
-bun run dev
+BUNVIEW_CWD="/path/to/project" bun run dev
 ```
 
-The file tools are then confined to that directory — the CLI scopes them to `cwd`, and nothing here passes `--add-dir` to widen it.
+The defaults already allow `Read,Grep,Glob`, so pointing `cwd` somewhere is the whole change. The file tools are then confined to that directory — the CLI scopes them to `cwd`, and nothing here passes `--add-dir` to widen it.
+
+To grant a tool that is not in the defaults, add it to **both** lists — `BUNVIEW_TOOLS` so it exists, and `BUNVIEW_ALLOWED_TOOLS` so it does not raise a prompt this app cannot display:
+
+```bash
+BUNVIEW_TOOLS="Read,Grep,Glob,WebFetch" \
+BUNVIEW_ALLOWED_TOOLS="Read,Grep,Glob,WebFetch,mcp__bunview__*" \
+bun run dev
+```
 
 ## Architecture notes
 
@@ -239,7 +293,29 @@ Two endpoints reach outside the app's own process, and both are gated behind an 
 
 Implement [`Provider`](src/server/providers/types.ts) — `detect()`, `authStatus()`, `stream()` — in a file beside `claude.ts` and `codex.ts`, add it to `PROVIDERS` in [`shared/events.ts`](src/shared/events.ts) and to the registry in [`providers/index.ts`](src/server/providers/index.ts). Because `stream()` yields only `AppEvent`, the frontend needs no changes — it cannot tell the vendors apart.
 
+### Per-provider parameters
+
+`models`, `efforts` and `settings` on `ProviderInfo` are what the composer renders and what [`chat.ts`](src/server/chat.ts) validates against. **These are per vendor and must not be shared.**
+
+|         | Claude Code                           | Codex                                              |
+| ------- | ------------------------------------- | -------------------------------------------------- |
+| Models  | `opus`, `sonnet`, `haiku`, `fable`    | `gpt-6-astra`, `gpt-5.6-sol/terra/luna`, `gpt-5.5` |
+| Efforts | `low`→`max` (the SDK's `EffortLevel`) | `minimal`→`xhigh` (`model_reasoning_effort`)       |
+| Extra   | `thinking`                            | `verbosity`, `summary`                             |
+
+Both lists put the vendor's own default model first.
+
+`settings` is a declared list rather than named fields, so adding a knob is a data change here and no branch in the composer. Keep them to **quality and presentation**. The sandbox, tool list and permission mode come from the environment on purpose (see [Safety defaults](#safety-defaults)); putting any of them behind a dropdown hands every user a control the safety posture assumes nobody has.
+
 Discovery is shared: [`discovery.ts`](src/server/providers/discovery.ts) takes a `CliSpec` (binary name, npm package, path to the real entry point) and returns a spawnable **argv** rather than a bare path.
+
+It tries five rungs, in this order:
+
+1. `BUNVIEW_<PROVIDER>_PATH`, if set. A wrong override is a hard failure, never a silent fallthrough.
+2. `PATH`. On Windows this is an npm shim, which is resolved to the real executable rather than run — see the header comment in `discovery.ts` for why routing a chat prompt through `cmd.exe` is not an acceptable degradation.
+3. Well-known install locations, because a GUI-launched app does not inherit the login shell's `PATH`.
+4. **The binary the Agent SDK shipped for this platform** — `@anthropic-ai/claude-agent-sdk-<platform>-<arch>`, which npm installs as an optional dependency of the SDK. It is a real executable at a known path, version-matched to the SDK that will drive it, so in dev the npm-shim problem never arises. Resolution failing is normal and silent: a compiled build has no `node_modules`.
+5. BunView's own managed copy, last, so a CLI the user installed themselves always wins.
 
 ## Build
 
@@ -275,7 +351,11 @@ import { extractFromBunfs } from '@anthropic-ai/claude-agent-sdk/extract'
 // pathToClaudeCodeExecutable: extractFromBunfs(binPath)
 ```
 
-`require.resolve` cannot see into the compiled `$bunfs`, which is what `extractFromBunfs` (SDK ≥ 0.3.144) exists for. Not used here because cross-compiling five targets would require all eight per-platform packages present.
+`require.resolve` cannot see into the compiled `$bunfs`, which is what `extractFromBunfs` (SDK ≥ 0.3.144) exists for.
+
+Not used here because `build:all` cross-compiles five targets, and a static `import … with { type: 'file' }` would need all eight per-platform packages installed to do that. Note the asymmetry if you only ship your own platform: `bun run build` needs exactly one package, and it is already installed — so a host-target build could embed the binary and skip the installer entirely, leaving `POST /api/install` as the path for cross-compiled artifacts only.
+
+In **dev** none of this applies: discovery rung 4 above already finds that same per-platform binary in `node_modules`, so a working `claude` is present from `bun install` alone.
 
 ## Frontend fallback
 
@@ -290,19 +370,3 @@ await Bun.build({
   minify: true,
 })
 ```
-
-## License
-
-BunView is [MIT](LICENSE) licensed. Fork it, ship it closed-source, no attribution beyond the
-license notice.
-
-That covers **this repo's code only**. Two things it deliberately does not cover:
-
-- **`@anthropic-ai/claude-agent-sdk`** is not open source — its `LICENSE.md` reads _"© Anthropic
-  PBC. All rights reserved,"_ with use subject to Anthropic's
-  [legal agreements](https://code.claude.com/docs/en/legal-and-compliance).
-- **The agent CLIs** the app discovers, installs and spawns (`claude`, `codex`) are the vendors'
-  own binaries under the vendors' own terms. BunView never redistributes them; `POST /api/install`
-  downloads them from the vendor at runtime.
-
-Every other runtime dependency is MIT, except `lucide-react`, which is ISC.

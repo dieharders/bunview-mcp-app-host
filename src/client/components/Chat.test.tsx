@@ -66,7 +66,9 @@ describe('Chat — provider gate', () => {
     render(<Chat />)
 
     expect(screen.queryByRole('heading', { name: /Connect your AI plan/i })).toBeNull()
-    await waitFor(() => expect(screen.getByText(/Claude Code max/i)).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByRole('status').getAttribute('aria-label')).toMatch(/Claude Code/i),
+    )
   })
 })
 
@@ -88,7 +90,12 @@ describe('Chat — signed in', () => {
     mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
     render(<Chat />)
 
-    await waitFor(() => expect(screen.getByText(/Codex pro/i)).toBeDefined())
+    // Intent is the hardcoded-vendor guard, not the exact phrasing: assert the chosen
+    // provider's label reaches the badge and the other vendor's never does.
+    await waitFor(() =>
+      expect(screen.getByRole('status').getAttribute('aria-label')).toMatch(/Codex/i),
+    )
+    expect(screen.getByRole('status').getAttribute('aria-label')).not.toMatch(/Claude/i)
   })
 
   test('warns when billing is by API key rather than the subscription', async () => {
@@ -98,7 +105,187 @@ describe('Chat — signed in', () => {
 
     await waitFor(() => expect(screen.getByText(/billed per token/i)).toBeDefined())
   })
+})
 
+/**
+ * What is being billed, said out loud in both directions.
+ *
+ * The failure this guards is asymmetric and therefore easy to ship: the API-key path warns,
+ * the subscription path used to just… not warn. "No warning" is indistinguishable from "not
+ * checked yet" to anyone who has not read the source, so both states name the credential.
+ */
+describe('Chat — says which credential is in use', () => {
+  /**
+   * The badge's accessible name, which is the one place the whole claim exists as a single
+   * string. The visible text is split across spans for styling, so asserting on it directly
+   * is a matcher problem rather than a behaviour one.
+   */
+  const badge = () => screen.getByRole('status').getAttribute('aria-label') ?? ''
+
+  test('names the plan when the subscription is what gets billed', async () => {
+    chooseProvider('claude')
+    mockServer({
+      state: 'ok',
+      account: 'me@example.com',
+      plan: 'max',
+      subscription: true,
+      apiKeyOverride: false,
+      credentialMode: 'auto',
+    })
+    render(<Chat />)
+
+    await waitFor(() => expect(badge()).toMatch(/using your max plan/i))
+    expect(badge()).toMatch(/me@example\.com/)
+    expect(badge()).not.toMatch(/API key/i)
+    expect(badge()).not.toMatch(/billed per token/i)
+  })
+
+  test('names the API key, and keeps the account while doing it', async () => {
+    chooseProvider('claude')
+    mockServer({
+      state: 'ok',
+      account: 'me@example.com',
+      plan: 'max',
+      subscription: false,
+      apiKeyOverride: true,
+      credentialMode: 'auto',
+    })
+    render(<Chat />)
+
+    await waitFor(() => expect(badge()).toMatch(/using an API key/i))
+    expect(badge()).toMatch(/billed per token/i)
+    // Dropped on this path before. It is exactly when the user most needs it: the key and the
+    // signed-in account can belong to different people.
+    expect(badge()).toMatch(/me@example\.com/)
+    // The account really does hold Max, but it is NOT what is paying — so the badge must not
+    // present it as the live credential.
+    expect(badge()).not.toMatch(/using your max plan/i)
+  })
+
+  test('the header never claims the subscription while an API key is winning', async () => {
+    chooseProvider('claude')
+    mockServer({
+      state: 'ok',
+      account: null,
+      plan: 'max',
+      subscription: false,
+      apiKeyOverride: true,
+      credentialMode: 'auto',
+    })
+    render(<Chat />)
+
+    // The subtitle asserted "on your subscription" unconditionally, so the header and the
+    // badge disagreed — one of them being wrong is worse than either being absent.
+    await waitFor(() => expect(screen.getByText(/Claude Code on an API key/i)).toBeDefined())
+    expect(screen.queryByText(/Claude Code on your subscription/i)).toBeNull()
+  })
+})
+
+/**
+ * Choosing between the plan and an API key.
+ *
+ * The app used to strip `ANTHROPIC_API_KEY` from every CLI it spawned. Anthropic's terms for
+ * running Claude Code inside another product forbid the host removing an authentication method
+ * built into the binary — the user's own API key being named as one — so the strip became a
+ * mode the user picks, defaulting to `auto`. These pin that the choice is actually reachable,
+ * and that it is hidden when it would be meaningless.
+ */
+describe('Chat — credential switch', () => {
+  test('offers to switch to the plan when a key is present and winning', async () => {
+    chooseProvider('claude')
+    mockServer({
+      state: 'ok',
+      account: 'me@example.com',
+      plan: 'max',
+      subscription: false,
+      apiKeyOverride: true,
+      credentialMode: 'auto',
+    })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Use my plan/i })).toBeDefined())
+    // The opposite offer would be nonsense in this state.
+    expect(screen.queryByRole('button', { name: /Use API key/i })).toBeNull()
+  })
+
+  test('offers the way back, so the switch is never one-way', async () => {
+    chooseProvider('claude')
+    mockServer({
+      state: 'ok',
+      account: 'me@example.com',
+      plan: 'max',
+      subscription: true,
+      apiKeyOverride: true,
+      credentialMode: 'subscription',
+    })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByRole('button', { name: /Use API key/i })).toBeDefined())
+    expect(screen.queryByRole('button', { name: /Use my plan/i })).toBeNull()
+  })
+
+  test('hides the switch entirely when there is no second credential', async () => {
+    chooseProvider('claude')
+    mockServer({
+      state: 'ok',
+      account: 'me@example.com',
+      plan: 'max',
+      subscription: true,
+      apiKeyOverride: false,
+      credentialMode: 'auto',
+    })
+    render(<Chat />)
+
+    await waitFor(() =>
+      expect(screen.getByRole('status').getAttribute('aria-label')).toMatch(/max plan/i),
+    )
+    // A toggle between one thing and itself implies the plan might not be what is billed,
+    // when it certainly is.
+    expect(screen.queryByRole('button', { name: /Use my plan/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Use API key/i })).toBeNull()
+  })
+
+  test('switching posts the new mode and re-probes rather than guessing the result', async () => {
+    chooseProvider('claude')
+
+    const calls: string[] = []
+    let mode = 'auto'
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      calls.push(`${init?.method ?? 'GET'} ${url}`)
+      if (url.includes('/api/credentials')) {
+        mode = JSON.parse(String(init?.body)).mode as string
+        return Response.json({ mode })
+      }
+      if (url.includes('/api/auth')) {
+        return Response.json({
+          state: 'ok',
+          account: 'me@example.com',
+          plan: 'max',
+          // The server's answer changes with the mode, which is the point: the badge reports
+          // what the CLI says, not what the click intended.
+          subscription: mode === 'subscription',
+          apiKeyOverride: true,
+          credentialMode: mode,
+        })
+      }
+      if (url.includes('/api/state')) return Response.json({ status: null, notes: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    render(<Chat />)
+
+    const button = await screen.findByRole('button', { name: /Use my plan/i })
+    await act(async () => void fireEvent.click(button))
+
+    expect(calls).toContain('POST /api/credentials')
+    // Re-probed after the change, or the badge would still show the old billing.
+    expect(calls.filter((c) => c.includes('/api/auth')).length).toBeGreaterThan(1)
+    await waitFor(() => expect(screen.getByRole('button', { name: /Use API key/i })).toBeDefined())
+  })
+})
+
+describe('Chat — composer', () => {
   test('a starter prompt fills the composer instead of sending it', async () => {
     chooseProvider('claude')
     mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
@@ -118,7 +305,9 @@ describe('Chat — signed in', () => {
     mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
     render(<Chat />)
 
-    await waitFor(() => expect(screen.getByText(/Codex pro/i)).toBeDefined())
+    await waitFor(() =>
+      expect(screen.getByRole('status').getAttribute('aria-label')).toMatch(/Codex/i),
+    )
     expect(screen.queryByRole('button', { name: /set_status/i })).toBeNull()
   })
 
@@ -129,9 +318,90 @@ describe('Chat — signed in', () => {
 
     await waitFor(() => expect(screen.getByLabelText('Model')).toBeDefined())
 
-    // A scaffold should not burn a Max plan's quota to say hello.
+    // A scaffold should not burn a Max plan's quota to say hello. There is no environment
+    // variable for this — effort is per-message only; see the README's safety section.
     expect((screen.getByLabelText('Effort') as HTMLSelectElement).value).toBe('low')
     expect((screen.getByLabelText('Model') as HTMLSelectElement).value).toBe('default')
+  })
+})
+
+/**
+ * The pickers belong to the chosen provider, not to Claude.
+ *
+ * One global list used to feed these, holding Claude's aliases and effort levels, and it was
+ * rendered whichever provider was selected — so a Codex user could pick `opus` as a model and
+ * `max` as an effort, neither of which Codex takes.
+ */
+describe('Chat — per-provider parameters', () => {
+  const values = (label: string) =>
+    Array.from((screen.getByLabelText(label) as HTMLSelectElement).options).map((o) => o.value)
+
+  test('Claude gets Claude models and its own extra knobs', async () => {
+    chooseProvider('claude')
+    mockServer({ state: 'ok', account: null, plan: 'max', subscription: true })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByLabelText('Model')).toBeDefined())
+    expect(values('Model')).toContain('opus')
+    expect(values('Model')).not.toContain('gpt-5.6-terra')
+    expect(values('Effort')).toContain('max')
+    // Declared in PROVIDERS.claude.settings, rendered without the composer knowing the vendor.
+    expect(screen.getByLabelText('Thinking')).toBeDefined()
+  })
+
+  test('Codex gets OpenAI models and its own knobs, not Claude’s', async () => {
+    chooseProvider('codex')
+    mockServer({ state: 'ok', account: null, plan: 'pro', subscription: true })
+    render(<Chat />)
+
+    await waitFor(() => expect(screen.getByLabelText('Model')).toBeDefined())
+    expect(values('Model')).toContain('gpt-5.6-terra')
+    expect(values('Model')).not.toContain('opus')
+
+    // `minimal` is a Codex effort and `max` is not — the asymmetry the shared list hid.
+    expect(values('Effort')).toContain('minimal')
+    expect(values('Effort')).not.toContain('max')
+
+    expect(screen.getByLabelText('Verbosity')).toBeDefined()
+    expect(screen.getByLabelText('Reasoning')).toBeDefined()
+    // Claude's knob must not appear for Codex.
+    expect(screen.queryByLabelText('Thinking')).toBeNull()
+  })
+
+  test('the chosen parameters actually reach the request', async () => {
+    chooseProvider('codex')
+
+    let sent: Record<string, unknown> | null = null
+    globalThis.fetch = mock(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('/api/chat')) {
+        sent = JSON.parse(String(init?.body)) as Record<string, unknown>
+        return new Response(
+          new TextEncoder().encode(
+            `data: ${JSON.stringify({ type: 'done', sessionId: null, durationMs: 1 })}\n\n`,
+          ),
+          { headers: { 'content-type': 'text/event-stream' } },
+        )
+      }
+      if (url.includes('/api/auth')) {
+        return Response.json({ state: 'ok', account: null, plan: 'pro', subscription: true })
+      }
+      if (url.includes('/api/state')) return Response.json({ status: null, notes: [] })
+      throw new Error(`unexpected fetch: ${url}`)
+    }) as unknown as typeof fetch
+
+    render(<Chat />)
+
+    const box = await screen.findByPlaceholderText(/Ask Codex anything/i)
+    fireEvent.change(screen.getByLabelText('Effort'), { target: { value: 'minimal' } })
+    fireEvent.change(screen.getByLabelText('Verbosity'), { target: { value: 'low' } })
+    fireEvent.change(box, { target: { value: 'hi' } })
+    await act(async () => void fireEvent.click(screen.getByRole('button', { name: /Send/i })))
+
+    // Selecting a control that never reaches the server is exactly what effort did for Codex
+    // before this: present, changeable, and ignored.
+    expect(sent!.effort).toBe('minimal')
+    expect((sent!.settings as Record<string, string>).verbosity).toBe('low')
   })
 })
 

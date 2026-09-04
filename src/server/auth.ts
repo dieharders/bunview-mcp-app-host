@@ -11,6 +11,7 @@
  * user who just finished signing in and pressed Retry.
  */
 import type { AuthResponse } from '../shared/events'
+import { getCredentialMode } from './credentials'
 import { hadApiKeyOverride } from './env'
 import { getProvider } from './providers'
 import { resetDiscovery } from './providers/discovery'
@@ -29,8 +30,23 @@ export async function handleAuth(req: Request): Promise<Response> {
   const [auth, detection] = await Promise.all([provider.authStatus(), provider.detect()])
 
   // Reported in every state, because the state it matters most in is `logged_out` — the user
-  // is one click from a sign-in that their own shell may quietly redirect.
-  const apiKeyOverride = hadApiKeyOverride(provider.id)
+  // is one click from a sign-in that their own shell may quietly redirect. The mode rides
+  // along so the header knows which way to offer the switch; `apiKeyOverride` decides whether
+  // to offer it at all, since with no key present there is no second option to switch to.
+  //
+  // `keySource` rides along for the case `apiKeyOverride` cannot see: a key from `apiKeyHelper`
+  // or a managed `/login` key is in the user's Claude settings, not the environment, so the
+  // override flag is false and the switch stays hidden while the badge still says "billed per
+  // token". Naming the source is what turns that into a warning the user can act on.
+  //
+  // Read AFTER `provider.authStatus()`, never before: that call can move the mode, dropping
+  // back to `auto` for a user whose only credential is the key it would otherwise have
+  // stripped. Reading first would report `subscription` over a response proving otherwise.
+  const env = {
+    apiKeyOverride: hadApiKeyOverride(provider.id),
+    credentialMode: getCredentialMode(),
+    keySource: auth.keySource ?? null,
+  }
 
   if (auth.state === 'cli_missing') {
     return Response.json({
@@ -40,7 +56,7 @@ export async function handleAuth(req: Request): Promise<Response> {
       // Whether to offer the Install button at all. Decided on the server because the
       // preconditions are the server's to know.
       canInstall: canInstall(provider.id),
-      apiKeyOverride,
+      ...env,
     } satisfies AuthResponse)
   }
 
@@ -50,9 +66,9 @@ export async function handleAuth(req: Request): Promise<Response> {
       account: auth.account,
       plan: auth.plan,
       subscription: auth.subscription,
-      apiKeyOverride,
+      ...env,
     } satisfies AuthResponse)
   }
 
-  return Response.json({ state: auth.state, apiKeyOverride } satisfies AuthResponse)
+  return Response.json({ state: auth.state, ...env } satisfies AuthResponse)
 }

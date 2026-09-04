@@ -3,11 +3,18 @@ import { cn } from '../lib/cn'
 import { Spinner } from './ui/Spinner'
 
 /**
- * Whether the app can talk to the chosen provider, and on whose dime.
+ * Whether the app can talk to the chosen provider, and ON WHOSE DIME.
  *
- * The `subscription` distinction is why this is a badge rather than a boolean: an API key
- * works perfectly well and would look identical, while billing per token instead of against
- * the user's plan. Saying which is in play is the honest thing to show.
+ * The second half is the whole reason this is a badge rather than a boolean. An API key works
+ * perfectly well and produces an identical-looking conversation while billing per token
+ * instead of against the user's plan. Both states therefore name the credential OUT LOUD —
+ * neither is allowed to be the silent one, because "no warning" is not a thing a user can
+ * distinguish from "not looked at yet".
+ *
+ * The signal comes from the CLI's own `apiKeySource`, not from this app's guess at which
+ * variable the vendor would have preferred. See `readAuthStatus` in providers/claude.ts: with
+ * a key exported, every other field still says "max", so a badge built on those alone shows
+ * green over a session billed per token.
  *
  * Problems get a compact chip here and the full explanation in SetupBanner below the header.
  * Putting the whole card in the header made it overflow the window — a header is one
@@ -26,8 +33,45 @@ export function AuthBadge({ provider, auth }: { provider: ProviderId; auth: Auth
   }
 
   if (auth.state === 'ok') {
+    // Named in BOTH branches so the two are directly comparable, rather than one reading as a
+    // status and the other as a warning. Only the API-key side spells out the consequence,
+    // because "Max plan" already states what is paying while "API key" does not say at whose
+    // expense.
+    const credential = auth.subscription
+      ? `${auth.plan ?? 'subscription'} plan`
+      : 'API key — billed per token'
+
+    // WHERE the key came from, and only when the header cannot offer to do anything about it.
+    //
+    // `apiKeyOverride` is environment-only, because the environment is the only thing BunView
+    // can strip. A key from `apiKeyHelper` or a managed `/login` key lives in the user's Claude
+    // settings, so that flag is false: no switch renders, and SetupBanner never appears at all
+    // because this state is `ok`. The result was an amber badge warning about per-token billing
+    // with no cause named anywhere on screen and no control to act on. Say the source out loud
+    // instead — it is the one thing that makes the warning actionable, since the fix is in the
+    // user's own settings rather than in this app.
+    const unreachableKey = !auth.subscription && !auth.apiKeyOverride ? auth.keySource : null
+
+    // The visible text is split across spans for styling, which leaves a screen reader to
+    // stitch "Claude Code", "·", "Max plan" together and gives tests nothing stable to assert
+    // on. One `aria-label` states the whole thing — what is connected, and what pays for it.
+    const summary = auth.subscription
+      ? `${label}, using your ${auth.plan ?? 'subscription'} plan${auth.account ? `, signed in as ${auth.account}` : ''}`
+      : `${label}, using an API key${unreachableKey ? ` from ${unreachableKey}` : ''} — billed per token${auth.account ? `, signed in as ${auth.account}` : ''}`
+
     return (
-      <span className="inline-flex items-center gap-2 text-xs">
+      <span
+        role="status"
+        aria-label={summary}
+        className="inline-flex items-center gap-2 text-xs"
+        title={
+          auth.subscription
+            ? `${label} is signed in and using your ${auth.plan ?? 'subscription'} plan. Usage counts against that plan's limits.`
+            : unreachableKey
+              ? `${label} is using an API key from ${unreachableKey}, so usage is billed per token rather than against your plan. That key is configured in your Claude settings rather than this app's environment, so BunView cannot switch away from it — remove it there to use your plan.`
+              : `${label} is using an API key, so usage is billed per token rather than against your plan.`
+        }
+      >
         <span
           className={cn(
             'size-2 rounded-full',
@@ -35,14 +79,23 @@ export function AuthBadge({ provider, auth }: { provider: ProviderId; auth: Auth
           )}
           aria-hidden
         />
-        <span className="text-slate-300">
-          {auth.subscription ? (
-            <>
-              {label} {auth.plan ?? 'subscription'}
-              {auth.account && <span className="text-slate-500"> · {auth.account}</span>}
-            </>
-          ) : (
-            <span className="text-amber-200">API key — usage is billed per token</span>
+        {/* The provider label stays HERE and not only in the header subtitle, because the
+            subtitle is replaced the moment an MCP tool sets an app status — which is most of
+            the time in a working session. Without it the badge would say "Max plan" with
+            nothing on screen naming whose plan. */}
+        <span className={auth.subscription ? 'text-slate-300' : 'text-amber-200'}>
+          {label}
+          {' · '}
+          {/* Capitalised for the plan case ("Max plan"); the key case is already cased. */}
+          <span className={auth.subscription ? 'capitalize' : undefined}>{credential}</span>
+          {/* The account is kept in BOTH states. It used to be dropped on the API-key path,
+              which is exactly when a user most needs to know which login they are looking at
+              — the key and the signed-in account can belong to different people. */}
+          {auth.account && (
+            <span className={auth.subscription ? 'text-slate-500' : 'text-amber-200/70'}>
+              {' · '}
+              {auth.account}
+            </span>
           )}
         </span>
       </span>
